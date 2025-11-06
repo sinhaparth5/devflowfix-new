@@ -1,0 +1,42 @@
+# Web Framework
+fastapi
+uvicorn[standard]
+mangum
+
+# Database & ORM
+sqlmodel
+psycopg2-binary
+alembic
+pgvector
+
+# HTTP Clients
+httpx
+aiohttp
+
+# AI/ML
+openai
+
+# Validation & Settings
+pydantic
+pydantic-settings
+
+# Async & Queue
+redis
+boto3
+
+# Utilities
+python-dotenv
+python-jose[cryptography]
+passlib[bcrypt]
+tenacity
+pybreaker
+structlog
+
+# External Integrations
+slack-sdk
+kubernetes
+PyGithub
+
+# Observability
+aws-xray-sdk
+aws-embedded-metrics
