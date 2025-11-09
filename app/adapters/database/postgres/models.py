@@ -4,7 +4,7 @@
 from datetime import datetime
 from typing import Optional
 from sqlmodel import SQLModel, Field, Column, JSON
-from sqlalchemy import Text, Index
+from sqlalchemy import Text, Index, desc
 from pgvector.sqlalchemy import Vector
 
 class IncidentTable(SQLModel, table=True):
@@ -74,10 +74,10 @@ class IncidentTable(SQLModel, table=True):
     # Indexes are defined in the migration files
     # But we can specify them here for documentation
     __table_args__ = (
-        Index('idx_incidents_timestamp_desc', 'timestamp', postgresql_ops={ 'timestamp', 'DESC' }),
+        Index('idx_incidents_timestamp_desc', desc('timestamp')),
         Index('idx_incidents_source_severity', 'source', 'severity'),
         Index('idx_incidents_outcome_created', 'outcome', 'created_at'),
-        Index('idx_incidents_confidence_desc', 'confidence', postgresql_ops={ 'confidence' : 'DESC' }),
+        Index('idx_incidents_confidence_desc', desc('confidence')),
     )
 
 class FeedbackTable(SQLModel, table=True):
@@ -161,7 +161,7 @@ class RemediationHistoryTable(SQLModel, table=True):
     
     # Metadata
     execution_logs: Optional[list] = Field(default=None, sa_column=Column(JSON))
-    metadata: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    remediation_metadata: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     
     __table_args__ = (
         Index('idx_remediation_incident_attempt', 'incident_id', 'attempt_number'),
