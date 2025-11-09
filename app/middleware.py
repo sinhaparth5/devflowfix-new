@@ -11,7 +11,7 @@ from starlette.types import ASGIApp
 import structlog
 
 from app.core.config import settings
-from app.exceptions import CodeHealerException
+from app.exceptions import DevFlowFixException
 
 logger = structlog.get_logger()
 
@@ -147,7 +147,7 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
         try:
             return await call_next(request)
             
-        except CodeHealerException as exc:
+        except DevFlowFixException as exc:
             # Handle custom exceptions
             logger.warning(
                 "application_error",
@@ -189,7 +189,7 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
                 },
             )
     
-    def _get_status_code_for_exception(self, exc: CodeHealerException) -> int:
+    def _get_status_code_for_exception(self, exc: DevFlowFixException) -> int:
         """
         Map exception type to HTTP status code.
         
