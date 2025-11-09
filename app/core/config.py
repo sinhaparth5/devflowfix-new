@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     )
     
     database_url: str = Field(
-        default="ostgresql://postgres:postgres@localhost:5432/vector_db",
+        default="postgresql://postgres:postgres@localhost:5432/vector_db",
         description="PostgreSQL database URL with credentials"
     )
     
@@ -134,7 +134,7 @@ class Settings(BaseSettings):
     )
     
     slack_approvals_channel: str = Field(
-        default="#codehealer-approvals",
+        default="#devflowfix-approvals",
         description="Slack channel for approval requests"
     )
     
@@ -404,7 +404,7 @@ class Settings(BaseSettings):
     )
     
     log_file_path: str = Field(
-        default="/var/log/codehealer/app.log",
+        default="/var/log/devflowfix/app.log",
         description="Log file path when log_to_file is enabled"
     )
     

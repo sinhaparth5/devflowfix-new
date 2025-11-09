@@ -3,9 +3,9 @@
 
 from typing import Optional, Any
 
-class CodeHealerException(Exception):
+class DevFlowFixException(Exception):
     """
-    Base exception for all CodeHealer errors.
+    Base exception for all DevFlowFix errors.
     
     All custom exceptions should inherit from this.
     """
@@ -36,7 +36,7 @@ class CodeHealerException(Exception):
             "details": self.details,
         }
 
-class IncidentNotFoundError(CodeHealerException):
+class IncidentNotFoundError(DevFlowFixException):
     """Raised when an incident cannot be found."""
     def __init__(self, incident_id: str):
         super().__init__(
@@ -46,7 +46,7 @@ class IncidentNotFoundError(CodeHealerException):
         )
 
 
-class IncidentAlreadyResolvedError(CodeHealerException):
+class IncidentAlreadyResolvedError(DevFlowFixException):
     """Raised when attempting to remediate an already resolved incident."""
     def __init__(self, incident_id: str):
         super().__init__(
@@ -55,7 +55,7 @@ class IncidentAlreadyResolvedError(CodeHealerException):
             details={"incident_id": incident_id},
         )
 
-class InvalidIncidentStateError(CodeHealerException):
+class InvalidIncidentStateError(DevFlowFixException):
     """Raised when incident is in an invalid state for the requested operation."""
     def __init__(self, incident_id: str, current_state: str, expected_state: str):
         super().__init__(
@@ -68,7 +68,7 @@ class InvalidIncidentStateError(CodeHealerException):
             },
         )
 
-class AnalysisFailedError(CodeHealerException):
+class AnalysisFailedError(DevFlowFixException):
     """Raised when incident analysis fails."""
     def __init__(self, incident_id: str, reason: str):
         super().__init__(
@@ -77,7 +77,7 @@ class AnalysisFailedError(CodeHealerException):
             details={"incident_id": incident_id, "reason": reason},
         )
 
-class ConfidenceTooLowError(CodeHealerException):
+class ConfidenceTooLowError(DevFlowFixException):
     """Raised when confidence score is below threshold for auto-fix."""
     def __init__(self, incident_id: str, confidence: float, threshold: float):
         super().__init__(
@@ -90,7 +90,7 @@ class ConfidenceTooLowError(CodeHealerException):
             },
         )
 
-class NoSimilarIncidentsFoundError(CodeHealerException):
+class NoSimilarIncidentsFoundError(DevFlowFixException):
     """Raised when no similar incidents found for RAG."""
     def __init__(self, incident_id: str):
         super().__init__(
@@ -99,7 +99,7 @@ class NoSimilarIncidentsFoundError(CodeHealerException):
             details={"incident_id": incident_id},
         )
 
-class RemediationFailedError(CodeHealerException):
+class RemediationFailedError(DevFlowFixException):
     """Raised when remediation execution fails."""
     def __init__(
         self,
@@ -119,7 +119,7 @@ class RemediationFailedError(CodeHealerException):
             },
         )
 
-class RemediationTimeoutError(CodeHealerException):
+class RemediationTimeoutError(DevFlowFixException):
     """Raised when remediation exceeds timeout."""
     def __init__(self, incident_id: str, timeout_seconds: int):
         super().__init__(
@@ -131,7 +131,7 @@ class RemediationTimeoutError(CodeHealerException):
             },
         )
 
-class ValidationFailedError(CodeHealerException):
+class ValidationFailedError(DevFlowFixException):
     """Raised when pre/post validation fails."""
     def __init__(
         self,
@@ -149,7 +149,7 @@ class ValidationFailedError(CodeHealerException):
             },
         )
 
-class RollbackFailedError(CodeHealerException):
+class RollbackFailedError(DevFlowFixException):
     """Raised when rollback operation fails."""
     def __init__(self, incident_id: str, snapshot_id: str, reason: str):
         super().__init__(
@@ -162,7 +162,7 @@ class RollbackFailedError(CodeHealerException):
             },
         )
 
-class NoRemediationPlanError(CodeHealerException):
+class NoRemediationPlanError(DevFlowFixException):
     """Raised when no remediation plan can be generated."""
     def __init__(self, incident_id: str, reason: str):
         super().__init__(
@@ -174,7 +174,7 @@ class NoRemediationPlanError(CodeHealerException):
             },
         )
 
-class ApprovalRequiredError(CodeHealerException):
+class ApprovalRequiredError(DevFlowFixException):
     """Raised when human approval is required but not provided."""
     def __init__(self, incident_id: str, reason: str):
         super().__init__(
@@ -186,7 +186,7 @@ class ApprovalRequiredError(CodeHealerException):
             },
         )
 
-class ApprovalTimeoutError(CodeHealerException):
+class ApprovalTimeoutError(DevFlowFixException):
     """Raised when approval request times out."""
     
     def __init__(self, incident_id: str, timeout_minutes: int):
@@ -199,7 +199,7 @@ class ApprovalTimeoutError(CodeHealerException):
             },
         )
 
-class ApprovalRejectedError(CodeHealerException):
+class ApprovalRejectedError(DevFlowFixException):
     """Raised when remediation is rejected by approver."""
     def __init__(self, incident_id: str, approver: str, reason: Optional[str] = None):
         super().__init__(
@@ -211,8 +211,8 @@ class ApprovalRejectedError(CodeHealerException):
                 "reason": reason,
             },
         )
-class RateLimitExceededError(CodeHealerException):
-    """Raised when rate limit is exceeded."""
+class RateLimitExceededError(DevFlowFixException):
+    """ Raised when rate limit is exceeded. """
     def __init__(
         self,
         resource: str,
@@ -231,7 +231,7 @@ class RateLimitExceededError(CodeHealerException):
             },
         )
 
-class BlastRadiusExceededError(CodeHealerException):
+class BlastRadiusExceededError(DevFlowFixException):
     """Raised when blast radius limit is exceeded."""
     def __init__(
         self,
@@ -251,7 +251,7 @@ class BlastRadiusExceededError(CodeHealerException):
             },
         )
 
-class ExternalServiceError(CodeHealerException):
+class ExternalServiceError(DevFlowFixException):
     """Base exception for external service errors."""
     def __init__(self, service: str, message: str, status_code: Optional[int] = None):
         super().__init__(
@@ -293,7 +293,7 @@ class PagerDutyAPIError(ExternalServiceError):
     def __init__(self, message: str, status_code: Optional[int] = None):
         super().__init__("PagerDuty", message, status_code)
 
-class DatabaseError(CodeHealerException):
+class DatabaseError(DevFlowFixException):
     """Raised when database operation fails."""
     def __init__(self, operation: str, reason: str):
         super().__init__(
@@ -310,7 +310,7 @@ class DatabaseConnectionError(DatabaseError):
     def __init__(self, reason: str):
         super().__init__("connection", reason)
 
-class ConfigurationError(CodeHealerException):
+class ConfigurationError(DevFlowFixException):
     """Raised when configuration is invalid or missing."""
     def __init__(self, setting: str, reason: str):
         super().__init__(
@@ -330,7 +330,7 @@ class MissingCredentialsError(ConfigurationError):
             f"Required credential '{credential}' is not configured",
         )
 
-class WebhookValidationError(CodeHealerException):
+class WebhookValidationError(DevFlowFixException):
     """Raised when webhook signature validation fails."""
     def __init__(self, source: str, reason: str):
         super().__init__(
@@ -342,7 +342,7 @@ class WebhookValidationError(CodeHealerException):
             },
         )
 
-class UnsupportedWebhookEventError(CodeHealerException):
+class UnsupportedWebhookEventError(DevFlowFixException):
     """Raised when webhook event type is not supported."""
     def __init__(self, source: str, event_type: str):
         super().__init__(
