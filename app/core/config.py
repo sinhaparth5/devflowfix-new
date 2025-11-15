@@ -1,15 +1,182 @@
 # Copyright (c) 2025 Parth Sinha and Shine Gupta. All rights reserved.
 # DevFlowFix - Autonomous AI agent the detects, analyzes, and resolves CI/CD failures in real-time.
 
-from typing import Optional, Any
+from typing import Optional, Any, List
+from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator
 
 from app.core.enums import Environment, LogLevel
 
+
+class DatabaseSettings(BaseSettings):
+    """Database configuration."""
+    
+    url: str = Field(default="postgresql://postgres:postgres@localhost:5432/devflowfix", alias="DATABASE_URL")
+    pool_size: int = Field(default=5, alias="DB_POOL_SIZE")
+    max_overflow: int = Field(default=10, alias="DB_MAX_OVERFLOW")
+    pool_timeout: int = Field(default=30, alias="DB_POOL_TIMEOUT")
+    pool_recycle: int = Field(default=3600, alias="DB_POOL_RECYCLE")
+    pool_pre_ping: bool = Field(default=True, alias="DB_POOL_PRE_PING")
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+
+class GitHubSettings(BaseSettings):
+    """GitHub integration configuration."""
+    
+    webhook_secret: str = Field(default="", alias="GITHUB_WEBHOOK_SECRET")
+    token: Optional[str] = Field(default=None, alias="GITHUB_TOKEN")
+    app_id: Optional[str] = Field(default=None, alias="GITHUB_APP_ID")
+    app_private_key_path: Optional[str] = Field(default=None, alias="GITHUB_APP_PRIVATE_KEY_PATH")
+    app_installation_id: Optional[str] = Field(default=None, alias="GITHUB_APP_INSTALLATION_ID")
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+
+class AWSSettings(BaseSettings):
+    """AWS configuration."""
+    
+    region: str = Field(default="us-east-1", alias="AWS_REGION")
+    lambda_function_name: Optional[str] = Field(default=None, alias="AWS_LAMBDA_FUNCTION_NAME")
+    account_id: Optional[str] = Field(default=None, alias="AWS_ACCOUNT_ID")
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+
+class AISettings(BaseSettings):
+    """AI/ML configuration."""
+    
+    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
+    nvidia_api_key: Optional[str] = Field(default=None, alias="NVIDIA_API_KEY")
+    embedding_model: str = Field(default="nvidia/nv-embed-v1", alias="EMBEDDING_MODEL")
+    embedding_dimensions: int = Field(default=768, alias="EMBEDDING_DIMENSIONS")
+    llm_model: str = Field(default="gpt-4-turbo-preview", alias="LLM_MODEL")
+    llm_temperature: float = Field(default=0.2, alias="LLM_TEMPERATURE")
+    llm_max_tokens: int = Field(default=2000, alias="LLM_MAX_TOKENS")
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+
+class RedisSettings(BaseSettings):
+    """Redis configuration."""
+    
+    url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
+    password: Optional[str] = Field(default=None, alias="REDIS_PASSWORD")
+    ttl: int = Field(default=3600, alias="REDIS_TTL")
+    max_connections: int = Field(default=10, alias="REDIS_MAX_CONNECTIONS")
+    socket_timeout: int = Field(default=5, alias="REDIS_SOCKET_TIMEOUT")
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+
+class ObservabilitySettings(BaseSettings):
+    """Observability and monitoring configuration."""
+    
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    sentry_dsn: Optional[str] = Field(default=None, alias="SENTRY_DSN")
+    datadog_api_key: Optional[str] = Field(default=None, alias="DATADOG_API_KEY")
+    xray_enabled: bool = Field(default=False, alias="XRAY_ENABLED")
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+
+class SecuritySettings(BaseSettings):
+    """Security configuration."""
+    
+    secret_key: str = Field(default="change-me-in-production-use-secrets-manager", alias="SECRET_KEY")
+    jwt_secret_key: str = Field(default="change-me-in-production", alias="JWT_SECRET_KEY")
+    jwt_algorithm: str = Field(default="HS256", alias="JWT_ALGORITHM")
+    jwt_expiration_hours: int = Field(default=24, alias="JWT_EXPIRATION_HOURS")
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+
+class FeatureFlagSettings(BaseSettings):
+    """Feature flags configuration."""
+    
+    enable_auto_remediation: bool = Field(default=True, alias="ENABLE_AUTO_REMEDIATION")
+    enable_slack_notifications: bool = Field(default=True, alias="ENABLE_SLACK_NOTIFICATIONS")
+    enable_pagerduty_escalation: bool = Field(default=False, alias="ENABLE_PAGERDUTY_ESCALATION")
+    enable_metrics_collection: bool = Field(default=True, alias="ENABLE_METRICS_COLLECTION")
+    enable_learning_mode: bool = Field(default=True, alias="ENABLE_LEARNING_MODE")
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+
+class ConfidenceSettings(BaseSettings):
+    """Confidence threshold configuration."""
+    
+    threshold_dev: float = Field(default=0.70, alias="CONFIDENCE_THRESHOLD_DEV")
+    threshold_staging: float = Field(default=0.85, alias="CONFIDENCE_THRESHOLD_STAGING")
+    threshold_prod: float = Field(default=0.95, alias="CONFIDENCE_THRESHOLD_PROD")
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+
+class RateLimitSettings(BaseSettings):
+    """Rate limiting configuration."""
+    
+    enabled: bool = Field(default=True, alias="RATE_LIMIT_ENABLED")
+    requests: int = Field(default=100, alias="RATE_LIMIT_REQUESTS")
+    window: int = Field(default=60, alias="RATE_LIMIT_WINDOW")
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+
 class Settings(BaseSettings):
     """
-    Application settings loaded from environment variables.
+    Main application settings loaded from environment variables.
     
     All settings can be overridden by environment variables.
     Environment variables should be prefixed with the setting name in uppercase.
@@ -18,26 +185,37 @@ class Settings(BaseSettings):
         DATABASE_URL=postgresql://user:pass@localhost:5432/db
         ENVIRONMENT=production
     """
+    
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+    
+    # Application settings
     environment: Environment = Field(
         default=Environment.DEVELOPMENT,
         description="Deployment environment (dev, staging, prod)"
     )
     
-    version: str = Field(
-        default="0.1.0",
-        description="Application version"
-    )
+    app_name: str = Field(default="DevFlowFix", alias="APP_NAME")
+    app_version: str = Field(default="1.0.0", alias="APP_VERSION")
+    version: str = Field(default="0.1.0", description="Application version")
     
     log_level: LogLevel = Field(
         default=LogLevel.INFO,
         description="Logging level"
     )
     
-    debug: bool = Field(
-        default=False,
-        description="Enable debug mode"
-    )
+    debug: bool = Field(default=False, description="Enable debug mode", alias="DEBUG")
     
+    # API settings
+    api_host: str = Field(default="0.0.0.0", alias="API_HOST")
+    api_port: int = Field(default=8000, alias="API_PORT")
+    api_workers: int = Field(default=4, alias="API_WORKERS")
+    
+    # Database settings
     database_url: str = Field(
         default="postgresql://postgres:postgres@localhost:5432/vector_db",
         description="PostgreSQL database URL with credentials"
@@ -69,6 +247,7 @@ class Settings(BaseSettings):
         description="Recycle connections after this many seconds (0=disabled)"
     )
     
+    # NVIDIA API settings
     nvidia_api_key: str = Field(
         default="",
         description="NVIDIA NGC API key for LLM and embedding services"
@@ -103,6 +282,7 @@ class Settings(BaseSettings):
         description="Maximum retry attempts for failed API calls"
     )
     
+    # GitHub settings
     github_token: str = Field(
         default="",
         description="GitHub personal access token or App installation token"
@@ -118,6 +298,7 @@ class Settings(BaseSettings):
         description="GitHub API base URL"
     )
     
+    # Slack settings
     slack_token: str = Field(
         default="",
         description="Slack bot token (xoxb-...)"
@@ -138,6 +319,7 @@ class Settings(BaseSettings):
         description="Slack channel for approval requests"
     )
     
+    # ArgoCD settings
     argocd_server: Optional[str] = Field(
         default=None,
         description="ArgoCD server URL (e.g., argocd.example.com)"
@@ -153,6 +335,7 @@ class Settings(BaseSettings):
         description="Skip TLS verification for ArgoCD (dev only)"
     )
     
+    # Kubernetes settings
     kubeconfig_path: Optional[str] = Field(
         default=None,
         description="Path to kubeconfig file (defaults to ~/.kube/config)"
@@ -163,6 +346,7 @@ class Settings(BaseSettings):
         description="Default Kubernetes namespace"
     )
     
+    # PagerDuty settings
     pagerduty_api_key: Optional[str] = Field(
         default=None,
         description="PagerDuty API key for incident integration"
@@ -173,6 +357,7 @@ class Settings(BaseSettings):
         description="PagerDuty service ID"
     )
     
+    # AWS settings
     aws_region: str = Field(
         default="us-east-1",
         description="AWS region for services"
@@ -183,6 +368,7 @@ class Settings(BaseSettings):
         description="AWS account ID"
     )
     
+    # Redis settings
     redis_url: Optional[str] = Field(
         default=None,
         description="Redis connection URL (redis://host:port/db)"
@@ -199,6 +385,7 @@ class Settings(BaseSettings):
         ge=1,
         description="Redis socket timeout in seconds"
     )
+    
     # Confidence thresholds
     min_confidence_threshold: float = Field(
         default=0.70,
@@ -243,7 +430,7 @@ class Settings(BaseSettings):
         description="Maximum concurrent remediation executions"
     )
     
-    # Embedding dimensions
+    # Embedding settings
     embedding_dimension: int = Field(
         default=768,
         description="Vector embedding dimension size"
@@ -289,6 +476,7 @@ class Settings(BaseSettings):
         description="Always require approval for production remediations"
     )
     
+    # RAG settings
     rag_top_k: int = Field(
         default=5,
         ge=1,
@@ -310,7 +498,8 @@ class Settings(BaseSettings):
         description="Maximum context length for RAG in tokens"
     )
     
-    cors_origins: list[str] = Field(
+    # CORS settings
+    cors_origins: List[str] = Field(
         default=["*"],
         description="Allowed CORS origins (use specific origins in production)"
     )
@@ -320,6 +509,7 @@ class Settings(BaseSettings):
         description="Allow credentials in CORS requests"
     )
     
+    # Rate limiting settings
     rate_limit_enabled: bool = Field(
         default=True,
         description="Enable rate limiting"
@@ -339,6 +529,7 @@ class Settings(BaseSettings):
         description="Rate limit: requests per hour per client"
     )
     
+    # Feature flags
     enable_slack_rag: bool = Field(
         default=True,
         description="Enable RAG retrieval from Slack conversations"
@@ -369,6 +560,7 @@ class Settings(BaseSettings):
         description="Enable webhook endpoints"
     )
     
+    # Security settings
     secret_key: str = Field(
         default="change-me-in-production-use-secrets-manager",
         description="Secret key for signing tokens (use AWS Secrets Manager in prod)"
@@ -386,6 +578,7 @@ class Settings(BaseSettings):
         description="JWT token expiration in minutes"
     )
     
+    # Metrics settings
     metrics_export_interval_seconds: int = Field(
         default=60,
         ge=10,
@@ -393,6 +586,7 @@ class Settings(BaseSettings):
         description="Interval for exporting metrics"
     )
     
+    # Logging settings
     log_format: str = Field(
         default="json",
         description="Log format: json or console"
@@ -408,16 +602,10 @@ class Settings(BaseSettings):
         description="Log file path when log_to_file is enabled"
     )
     
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
-    )
-    
+    # Validators
     @field_validator("cors_origins", mode="before")
     @classmethod
-    def parse_cors_origins(cls, v: Any) -> list[str]:
+    def parse_cors_origins(cls, v: Any) -> List[str]:
         """Parse CORS origins from string or list."""
         if isinstance(v, str):
             return [origin.strip() for origin in v.split(",")]
@@ -447,6 +635,7 @@ class Settings(BaseSettings):
             return LogLevel(v.upper())
         return v
     
+    # Properties
     @property
     def is_production(self) -> bool:
         """Check if running in production environment."""
@@ -477,6 +666,57 @@ class Settings(BaseSettings):
         else:
             return self.min_confidence_threshold
     
+    @property
+    def database(self) -> DatabaseSettings:
+        """Get database settings."""
+        return DatabaseSettings()
+    
+    @property
+    def github(self) -> GitHubSettings:
+        """Get GitHub settings."""
+        return GitHubSettings()
+    
+    @property
+    def aws(self) -> AWSSettings:
+        """Get AWS settings."""
+        return AWSSettings()
+    
+    @property
+    def ai(self) -> AISettings:
+        """Get AI settings."""
+        return AISettings()
+    
+    @property
+    def redis(self) -> RedisSettings:
+        """Get Redis settings."""
+        return RedisSettings()
+    
+    @property
+    def observability(self) -> ObservabilitySettings:
+        """Get observability settings."""
+        return ObservabilitySettings()
+    
+    @property
+    def security(self) -> SecuritySettings:
+        """Get security settings."""
+        return SecuritySettings()
+    
+    @property
+    def features(self) -> FeatureFlagSettings:
+        """Get feature flags."""
+        return FeatureFlagSettings()
+    
+    @property
+    def confidence(self) -> ConfidenceSettings:
+        """Get confidence thresholds."""
+        return ConfidenceSettings()
+    
+    @property
+    def rate_limit(self) -> RateLimitSettings:
+        """Get rate limit settings."""
+        return RateLimitSettings()
+    
+    # Methods
     def get_blast_radius_limit(self, time_window: str = "hour") -> int:
         """
         Get blast radius limit based on time window.
@@ -539,16 +779,19 @@ class Settings(BaseSettings):
                 return masked
         return self.database_url
 
-settings = Settings()
 
+@lru_cache()
 def get_settings() -> Settings:
     """
-    Get application settings.
+    Get cached application settings.
+    
+    This function is cached to ensure settings are only loaded once.
     
     Returns:
         Settings instance
     """
-    return settings
+    return Settings()
+
 
 def reload_settings() -> Settings:
     """
@@ -559,6 +802,9 @@ def reload_settings() -> Settings:
     Returns:
         New Settings instance
     """
-    global settings
-    settings = Settings()
-    return settings
+    get_settings.cache_clear()
+    return get_settings()
+
+
+# Global settings instance
+settings = get_settings()
