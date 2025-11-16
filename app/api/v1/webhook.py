@@ -8,6 +8,8 @@ from fastapi.responses import JSONResponse
 import structlog
 
 from app.core.schemas.webhook import WebhookPayload, WebhookResponse
+from app.core.config import settings
+from app.adapters.external.github.webhooks import GitHubWebhookClient, WebhookSignatureError
 
 logger = structlog.get_logger(__name__)
 
@@ -113,35 +115,141 @@ async def receive_webhook(
     response_model=WebhookResponse,
     status_code=status.HTTP_200_OK,
     summary="GitHub webhook endpoint",
-    description="Dedicated endpoint for GitHub webhook",
+    description="Dedicated endpoint for GitHub webhooks with signature verification",
     tags=["Webhook"],
 )
 async def receive_github_webhook(
     request: Request,
-    payload: Dict[str, Any],
     x_github_event: str | None = Header(None),
     x_github_delivery: str | None = Header(None),
-    x_hub_signature_256: str | None = Header(None),
+    x_hub_signature_256: str | None = Header(None, alias="X-Hub-Signature-256"),
 ) -> WebhookResponse:
+    """
+    Receive and process GitHub webhook events with HMAC-SHA256 signature verification.
+    
+    Args:
+        request: FastAPI request object
+        x_github_event: GitHub event type (e.g., 'ping', 'workflow_run', 'push')
+        x_github_delivery: Unique delivery ID for this webhook
+        x_hub_signature_256: HMAC-SHA256 signature for verification
+        
+    Returns:
+        WebhookResponse with acknowledgement
+        
+    Raises:
+        HTTPException: If signature verification fails or payload is invalid
+    """
     incident_id = f"gh_{x_github_delivery or int(datetime.utcnow().timestamp() * 1000)}"
-
+    
+    # Get raw body for signature verification
+    body = await request.body()
+    
     logger.info(
         "github_webhook_received",
         incident_id=incident_id,
         event_type=x_github_event,
         delivery_id=x_github_delivery,
         has_signature=bool(x_hub_signature_256),
+        body_size=len(body),
     )
-
-    # TODO: Implement signature verification
-    # if not verify_github_signature(payload, x_hub_signature_256):
-    #     raise HTTPException(status_code=401, detail="Invalid signature")
-
+    
+    # Special handling for ping event
+    if x_github_event == "ping":
+        logger.info(
+            "github_webhook_ping",
+            incident_id=incident_id,
+            delivery_id=x_github_delivery,
+        )
+        return WebhookResponse(
+            incident_id=incident_id,
+            acknowledged=True,
+            queued=False,
+            message="GitHub webhook ping received successfully"
+        )
+    
+    # Verify signature if webhook secret is configured
+    if settings.github_webhook_secret:
+        try:
+            webhook_client = GitHubWebhookClient(settings.github_webhook_secret)
+            
+            if not x_hub_signature_256:
+                logger.error(
+                    "github_webhook_missing_signature",
+                    incident_id=incident_id,
+                    event_type=x_github_event,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Missing X-Hub-Signature-256 header"
+                )
+            
+            is_valid = webhook_client.verify_signature(body, x_hub_signature_256)
+            
+            if not is_valid:
+                logger.error(
+                    "github_webhook_invalid_signature",
+                    incident_id=incident_id,
+                    event_type=x_github_event,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid webhook signature"
+                )
+            
+            logger.info(
+                "github_webhook_signature_verified",
+                incident_id=incident_id,
+                event_type=x_github_event,
+            )
+            
+        except WebhookSignatureError as e:
+            logger.error(
+                "github_webhook_signature_error",
+                incident_id=incident_id,
+                error=str(e),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(e)
+            )
+    else:
+        logger.warning(
+            "github_webhook_secret_not_configured",
+            incident_id=incident_id,
+            message="Webhook secret not configured - skipping signature verification"
+        )
+    
+    # Parse payload
+    try:
+        import json
+        payload = json.loads(body.decode('utf-8'))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        logger.error(
+            "github_webhook_invalid_payload",
+            incident_id=incident_id,
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid JSON payload: {e}"
+        )
+    
     logger.debug(
         "github_webhook_payload",
         incident_id=incident_id,
         event_type=x_github_event,
         payload=payload,
+    )
+    
+    # TODO: Queue the event for async processing
+    # TODO: Extract failure details if it's a workflow_run failure
+    # TODO: Trigger incident analysis and remediation pipeline
+    
+    logger.info(
+        "github_webhook_processed",
+        incident_id=incident_id,
+        event_type=x_github_event,
+        delivery_id=x_github_delivery,
     )
 
     return WebhookResponse(
