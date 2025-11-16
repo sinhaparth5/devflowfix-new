@@ -146,3 +146,237 @@ class NVIDIAClient:
         except Exception as e:
             logger.error("nvidia_api_unexpected_error", url=url, error=str(e), exc_info=True)
             raise NVIDIAAPIError(f"Unexpected error: {e}")
+    
+    async def get(self, endpoint: str) -> Dict[str, Any]:
+        """
+        Make GET request to NVIDIA API.
+
+        Args:
+            endpoint: API endpoint
+        
+        Returns:
+            NVIDIAAPIError: If API request fails
+        """
+        url = endpoint if endpoint.startswith("http") else f"{self.base_url}{endpoint}"
+
+        try:
+            response = await self.client.get(url)
+
+            if response.status_code >= 400:
+                error_detail = self._extract_error_detail(response)
+                raise NVIDIAAPIError(
+                    error_detail or f"API request failed with status {response.status_code}",
+                    status_code=response.status_code,
+                )
+            return response.json()
+        except httpx.HTTPError as e:
+            logger.error("nvidia_api_error", url=url, error=str(e))
+            raise NVIDIAAPIError(f"HTTP error: {e}")
+        
+    def _extract_error_detail(self, response: httpx.Response) -> str:
+        """
+        Extract error detail from API response
+
+        Args:
+            response: HTTP response object
+        
+        Returns:
+            Error detail string
+        """
+        try:
+            error_json = response.json()
+
+            if "error" in error_json:
+                if isinstance(error_json["error"], dict):
+                    return error_json["error"].get("message", str(error_json["error"]))
+                return str(error_json["error"])
+            
+            if "detail" in error_json:
+                return str(error_json["detail"])
+            
+            if "message" in error_json:
+                return str(error_json["message"])
+            
+            return str(error_json)
+        
+        except Exception:
+            return response.text
+        
+    async def close(self):
+        """ Close the HTTP client """
+        await self.client.aclose()
+        logger.debug("nvidia_client_closed")
+
+    async def __aenter__(self):
+        """ Async context manager entry """
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """ Async context manager exit. """
+        await self.close()
+
+class NVIDIALMMClient(NVIDIAClient):
+    """
+    Specialezed client for NVIDIA LLM API
+
+    Handles completions and chat requests.
+    """
+    def __init__(self, model: Optional[str] = None, **kwargs):
+        """
+        Initialize LLM client.
+
+        Args:   
+            model: Model identifier (default to settings)
+            **kwargs: Additional arguments for NVIDIAClient
+        """
+        super().__init__(**kwargs)
+        self.model = model or settings.nvidia_llm_model
+
+        logger.info("nvidia_llm_client_initialized", model=self.model)
+
+    async def complete(
+            self,
+            prompt: str,
+            max_tokens: int = 1000,
+            temperature: float = 0.1,
+            **kwargs,
+    ) -> Dict[str, Any]:
+        """
+        Generate completion for prompt.
+
+        Args:
+            prompt: Input prompt
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature (0.0 = deterministic)
+            **kwargs: Additional parameters
+
+        Returns:
+            API response with completion
+        """
+        payload = {
+            "model": self.model,
+            "message": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            **kwargs,
+        }
+
+        logger.debug(
+            "nvidia_llm_complete",
+            model=self.model,
+            prompt_length=len(prompt),
+            max_tokens=max_tokens,
+            temperature=temperature
+        )
+
+        response = await self.post("/chat/completions", payload)
+
+        usage = response.get("usage", {})
+        logger.info(
+            "nvidia_llm_complete_success",
+            model=self.model,
+            prompt_tokens=usage.get("prompt_tokens"),
+            completion_tokens=usage.get("completion_tokens"),
+            total_tokens=usage.get("total_tokens"),
+        )
+
+        return response
+    
+    def extract_text(self, response: Dict[str, Any]) -> str:
+        """
+        Extract text from completion response
+
+        Args:
+            response: API response
+
+        Returns:
+            Generated text
+        """
+        try:
+            return response["choices"][0]["message"]["content"]
+        except (KeyError, IndexError) as e:
+            logger.error("nvidia_llm_extract_text_failed", error=str(e), response=response)
+            raise NVIDIAAPIError(f"Failed to extract text from the response: {e}")
+        
+class NVIDIAEmbeddingClient(NVIDIAClient):
+    """
+    Specialized client for NVIDIA embedding API.
+    
+    Handles text embedding generation.
+    """
+    
+    def __init__(self, model: Optional[str] = None, **kwargs):
+        """
+        Initialize embedding client.
+        
+        Args:
+            model: Model identifier (defaults to settings)
+            **kwargs: Additional arguments for NVIDIAClient
+        """
+        super().__init__(**kwargs)
+        self.model = model or settings.nvidia_embedding_model
+        
+        logger.info("nvidia_embedding_client_initialized", model=self.model)
+    
+    async def embed(
+        self,
+        texts: List[str],
+        input_type: str = "query",
+        **kwargs,
+    ) -> List[List[float]]:
+        """
+        Generate embeddings for texts.
+        
+        Args:
+            texts: List of texts to embed
+            input_type: "query" or "passage"
+            **kwargs: Additional parameters
+            
+        Returns:
+            List of embedding vectors
+        """
+        payload = {
+            "model": self.model,
+            "input": texts if isinstance(texts, list) else [texts],
+            "input_type": input_type,
+            **kwargs,
+        }
+        
+        logger.debug(
+            "nvidia_embedding_embed",
+            model=self.model,
+            num_texts=len(payload["input"]),
+            input_type=input_type,
+        )
+        
+        response = await self.post("/embeddings", payload)
+        
+        # Extract embeddings
+        try:
+            embeddings = [item["embedding"] for item in response["data"]]            
+            logger.info(
+                "nvidia_embedding_embed_success",
+                model=self.model,
+                num_embeddings=len(embeddings),
+                embedding_dim=len(embeddings[0]) if embeddings else 0,
+            )
+            
+            return embeddings
+            
+        except (KeyError, IndexError) as e:
+            logger.error("nvidia_embedding_extract_failed", error=str(e), response=response)
+            raise NVIDIAAPIError(f"Failed to extract embeddings from response: {e}")
+    
+    async def embed_single(self, text: str, **kwargs) -> List[float]:
+        """
+        Generate embedding for single text.
+        
+        Args:
+            text: Text to embed
+            **kwargs: Additional parameters
+            
+        Returns:
+            Embedding vector
+        """
+        embeddings = await self.embed([text], **kwargs)
+        return embeddings[0]
