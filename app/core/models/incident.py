@@ -55,8 +55,8 @@ class Incident:
     # Remediation
     remediation_plan: Optional[dict] = None
     remediation_executed: bool = False
-    remediation_start_time = Optional[datetime] = None
-    remediation_end_time = Optional[datetime] = None
+    remediation_start_time: Optional[datetime] = None
+    remediation_end_time: Optional[datetime] = None
 
     # Outcome
     outcome: Optional[Outcome] = None
