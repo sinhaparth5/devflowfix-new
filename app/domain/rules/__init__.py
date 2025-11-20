@@ -12,6 +12,8 @@ from app.domain.rules.base import BaseRule, RuleResult
 from app.domain.rules.confidence import ConfidenceRule
 from app.domain.rules.blast_radius import BlastRadiusRule
 from app.domain.rules.blacklist import BlacklistRule
+from app.domain.rules.time_window import TimeWindowRule
+from app.domain.rules.environment import EnvironmentRule
 
 __all__ = [
     "BaseRule",
@@ -19,4 +21,6 @@ __all__ = [
     "ConfidenceRule",
     "BlastRadiusRule",
     "BlacklistRule",
+    "TimeWindowRule",
+    "EnvironmentRule"
 ]
