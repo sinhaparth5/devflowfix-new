@@ -408,14 +408,3 @@ logger.info("webhook_routers_registered", prefixes=["/api/v1/webhook", "/webhook
 #     tags=["Approvals"]
 # )
 
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level=settings.log_level.value.lower(),
-        access_log=True,
-    )

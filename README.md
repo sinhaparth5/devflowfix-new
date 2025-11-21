@@ -25,7 +25,7 @@ DevFlowFix automatically fixes 75% of deployment failures in under 8 minutes by:
 uv sync
 
 # Start local development stack
-docker-compose up
+docker compose up -d
 
 # Run tests
 uv run pytest

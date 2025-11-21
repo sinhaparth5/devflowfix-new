@@ -10,6 +10,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+psycopg2://postgres:postgres@postgres:5432/vector_db
       - ENVIRONMENT=development
+      - PYTHONPATH=/app
     depends_on:
       - postgres
     volumes:
