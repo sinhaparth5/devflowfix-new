@@ -8,6 +8,7 @@ from app.adapters.database.postgres.repositories.feedback import FeedbackReposit
 from app.adapters.database.postgres.repositories.remediation_history import RemediationHistoryRepository
 from app.adapters.database.postgres.repositories.metric import MetricRepository
 from app.adapters.database.postgres.repositories.config import ConfigRepository
+from app.adapters.database.postgres.repositories.vector import VectorRepository
 
 __all__ = [
     "IncidentRepository",
@@ -15,4 +16,5 @@ __all__ = [
     "RemediationHistoryRepository",
     "MetricRepository",
     "ConfigRepository",
+    "VectorRepository"
 ]
