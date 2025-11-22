@@ -23,7 +23,7 @@ from app.services.remediator import RemediatorService
 from app.services.retriever import RetrieverService
 from app.adapters.database.postgres.repositories.incident import IncidentRepository
 from app.adapters.database.postgres.repositories.vector import VectorRepository
-from app.adapters.external.slack.notifications import SlackNotificationService
+from app.adapters.external.slack.notifications import SlackNotificationAdapter
 from app.adapters.ai.nvidia import EmbeddingAdapter
 
 logger = structlog.get_logger(__name__)
@@ -65,7 +65,7 @@ class EventProcessor:
         decision_service: DecisionService,
         remediator_service: RemediatorService,
         retriever_service: RetrieverService,
-        notification_service: Optional[SlackNotificationService] = None,
+        notification_service: Optional[SlackNotificationAdapter] = None,
         embedding_adapter: Optional[EmbeddingAdapter] = None,
         default_environment: Environment = Environment.DEVELOPMENT,
         enable_notifications: bool = True,
