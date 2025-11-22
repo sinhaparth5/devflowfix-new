@@ -9,8 +9,10 @@ from app.adapters.database.postgres.repositories.remediation_history import Reme
 from app.adapters.database.postgres.repositories.metric import MetricRepository
 from app.adapters.database.postgres.repositories.config import ConfigRepository
 from app.adapters.database.postgres.repositories.vector import VectorRepository
+from app.adapters.database.postgres.repositories.analytics import AnalyticsRepository
 
 __all__ = [
+    "AnalyticsRepository",
     "IncidentRepository",
     "FeedbackRepository",
     "RemediationHistoryRepository",
