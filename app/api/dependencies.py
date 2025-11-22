@@ -16,7 +16,7 @@ from app.services.retriever import RetrieverService
 from app.domain.strategies.factory import StrategyFactory
 from app.adapters.database.postgres.repositories.incident import IncidentRepository
 from app.adapters.database.postgres.repositories.vector import VectorRepository
-from app.adapters.external.slack.notifications import SlackNotificationService
+from app.adapters.external.slack.notifications import SlackNotificationAdapter
 from app.adapters.ai.nvidia import EmbeddingAdapter, LLMAdapter
 from app.core.enums import Environment
 
@@ -64,7 +64,7 @@ class ServiceContainer:
         self._analyzer_service: Optional[AnalyzerService] = None
         self._remediator_service: Optional[RemediatorService] = None
         self._retriever_service: Optional[RetrieverService] = None
-        self._notification_service: Optional[SlackNotificationService] = None
+        self._notification_service: Optional[SlackNotificationAdapter] = None
         self._embedding_adapter: Optional[EmbeddingAdapter] = None
         self._llm_adapter: Optional[LLMAdapter] = None
     
@@ -91,9 +91,9 @@ class ServiceContainer:
         return self._llm_adapter
     
     @property
-    def notification_service(self) -> Optional[SlackNotificationService]:
+    def notification_service(self) -> Optional[SlackNotificationAdapter]:
         if self._notification_service is None and self.settings.SLACK_BOT_TOKEN:
-            self._notification_service = SlackNotificationService(
+            self._notification_service = SlackNotificationAdapter(
                 token=self.settings.SLACK_BOT_TOKEN,
                 default_channel=self.settings.SLACK_DEFAULT_CHANNEL,
             )
