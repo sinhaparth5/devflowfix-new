@@ -1,6 +1,6 @@
 services:
   web:
     build:
-      dockerfile: infrastructure/docker/Dockerfile.local
+      dockerfile: infrastructure/docker/Dockerfile.dev
     ports:
       - 8000:8000
