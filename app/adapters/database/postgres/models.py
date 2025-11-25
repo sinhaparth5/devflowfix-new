@@ -50,6 +50,10 @@ class UserTable(SQLModel, table=True):
     api_key_hash: Optional[str] = Field(default=None, sa_column=Column(Text))
     api_key_prefix: Optional[str] = Field(default=None, max_length=10)
 
+    # GitHub Webhook Secret (dynamically generated, unique per user)
+    github_webhook_secret: Optional[str] = Field(default=None, sa_column=Column(Text))
+    github_username: Optional[str] = Field(default=None, max_length=50)
+
     # Audit
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
