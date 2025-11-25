@@ -52,6 +52,7 @@ class UserTable(SQLModel, table=True):
 
     # GitHub Webhook Secret (dynamically generated, unique per user)
     github_webhook_secret: Optional[str] = Field(default=None, sa_column=Column(Text))
+    github_username: Optional[str] = Field(default=None, max_length=50)
 
     # Audit
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
