@@ -17,6 +17,7 @@ from app.core.config import settings
 from app.core.enums import IncidentSource, Severity, FailureType
 from app.services.event_processor import EventProcessor
 from app.dependencies import get_db, get_event_processor
+from app.adapters.database.postgres.models import UserTable
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -767,27 +768,159 @@ async def process_webhook_async(
 
 
 @router.post(
+    "/webhook/secret/generate/me",
+    status_code=status.HTTP_201_CREATED,
+    summary="Generate webhook secret for authenticated user",
+    description="Generate webhook secret for currently logged-in user with ready-to-use GitHub configuration",
+    tags=["Webhook", "Security"],
+)
+async def generate_my_webhook_secret(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Generate new webhook secret for authenticated user with complete GitHub setup instructions.
+    
+    This endpoint:
+    - Generates a cryptographically secure 256-bit secret
+    - Stores it in the user's database record
+    - Returns the unique webhook URL for GitHub configuration
+    - Provides copy-paste ready instructions
+    
+    Authentication: Requires valid JWT token (imported from app.api.v1.auth)
+    Time Complexity: O(1) - Single database update
+    Space Complexity: O(1)
+    
+    Returns:
+        Dict containing:
+        - webhook_secret: The generated secret (SAVE THIS - shown only once)
+        - webhook_url: Your unique webhook endpoint URL
+        - github_config: Ready-to-use GitHub webhook configuration
+        - curl_example: Test command with your credentials
+    """
+    # Import here to avoid circular dependency
+    from app.api.v1.auth import get_current_active_user
+    
+    current_user_dict = await get_current_active_user(request)
+    current_user = current_user_dict["user"]
+    
+    from app.adapters.database.postgres.repositories.users import UserRepository
+    
+    user_repo = UserRepository(db)
+    new_secret = generate_webhook_secret()
+    
+    current_user.github_webhook_secret = new_secret
+    current_user.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(current_user)
+    
+    logger.info(
+        "webhook_secret_generated_for_authenticated_user",
+        user_id=current_user.user_id,
+        email=current_user.email,
+        secret_length=len(new_secret),
+    )
+    
+    base_url = settings.api_url if hasattr(settings, 'api_url') else "https://your-server.com"
+    webhook_url = f"{base_url}/api/v1/webhook/github/{current_user.user_id}"
+    
+    return {
+        "success": True,
+        "message": "Webhook secret generated successfully! Configure it in GitHub now.",
+        "user": {
+            "user_id": current_user.user_id,
+            "email": current_user.email,
+            "full_name": current_user.full_name,
+        },
+        "webhook_secret": new_secret,
+        "webhook_url": webhook_url,
+        "secret_length": len(new_secret),
+        "algorithm": "HMAC-SHA256",
+        "created_at": datetime.utcnow().isoformat(),
+        "github_configuration": {
+            "payload_url": webhook_url,
+            "content_type": "application/json",
+            "secret": new_secret,
+            "ssl_verification": "Enable SSL verification",
+            "events": ["workflow_run", "check_run"],
+            "active": True,
+        },
+        "setup_instructions": {
+            "step_1": {
+                "action": "Copy your webhook secret",
+                "value": new_secret,
+                "note": "IMPORTANT: Save this secret now - it will not be shown again!",
+            },
+            "step_2": {
+                "action": "Go to your GitHub repository",
+                "url": "https://github.com/YOUR_ORG/YOUR_REPO/settings/hooks",
+            },
+            "step_3": {
+                "action": "Click 'Add webhook'",
+            },
+            "step_4": {
+                "action": "Configure webhook settings",
+                "payload_url": webhook_url,
+                "content_type": "application/json",
+                "secret": new_secret,
+            },
+            "step_5": {
+                "action": "Select events",
+                "individual_events": [
+                    "Workflow runs",
+                    "Check runs"
+                ],
+                "note": "Uncheck 'Just the push event' and select individual events",
+            },
+            "step_6": {
+                "action": "Ensure 'Active' is checked",
+            },
+            "step_7": {
+                "action": "Click 'Add webhook'",
+            },
+        },
+        "test_configuration": {
+            "description": "Test your webhook configuration",
+            "curl_command": f'''curl -X POST "{webhook_url}" \\
+  -H "Content-Type: application/json" \\
+  -H "X-Hub-Signature-256: sha256=<signature>" \\
+  -H "X-GitHub-Event: workflow_run" \\
+  -d '{{"action":"completed","workflow_run":{{"conclusion":"failure"}}}}'
+''',
+            "generate_test_signature": f"{base_url}/api/v1/webhook/secret/test/me",
+        },
+        "benefits": {
+            "performance": "O(1) constant-time authentication - instant user lookup",
+            "security": "Isolated endpoint - your webhooks cannot interfere with other users",
+            "scalability": "Performance stays constant regardless of total user count",
+            "simplicity": "One URL for all your repositories - easy to manage",
+        },
+    }
+
+
+@router.post(
     "/webhook/secret/generate",
     status_code=status.HTTP_201_CREATED,
-    summary="Generate webhook secret",
-    description="Generate cryptographically secure webhook secret with unique endpoint URL",
-    tags=["Webhook", "Security"],
+    summary="Generate webhook secret (admin)",
+    description="Generate webhook secret for any user (requires admin privileges or user_id parameter)",
+    tags=["Webhook", "Security", "Admin"],
 )
 async def create_webhook_secret(
     user_id: str,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """
-    Generate new webhook secret for user with unique endpoint URL.
+    Generate new webhook secret for specific user (admin endpoint).
     
     Time Complexity: O(1) - Single database query and update
     Space Complexity: O(1)
     
+    Args:
+        user_id: Target user ID
+        db: Database session
+        
     Returns:
-        Dict containing:
-        - webhook_secret: The generated secret (save immediately)
-        - webhook_url: Unique path-based webhook URL
-        - instructions: Configuration steps
+        Dict containing webhook secret and configuration details
     """
     from app.adapters.database.postgres.repositories.users import UserRepository
     
@@ -808,12 +941,13 @@ async def create_webhook_secret(
     db.refresh(user)
     
     logger.info(
-        "webhook_secret_generated",
+        "webhook_secret_generated_admin",
         user_id=user_id,
         secret_length=len(new_secret),
     )
     
-    webhook_url = f"{settings.api_url if hasattr(settings, 'api_url') else ''}/api/v1/webhook/github/{user_id}"
+    base_url = settings.api_url if hasattr(settings, 'api_url') else "https://your-server.com"
+    webhook_url = f"{base_url}/api/v1/webhook/github/{user_id}"
     
     return {
         "success": True,
@@ -843,21 +977,105 @@ async def create_webhook_secret(
 
 
 @router.get(
+    "/webhook/secret/info/me",
+    status_code=status.HTTP_200_OK,
+    summary="Get my webhook configuration",
+    description="Get webhook secret information for currently logged-in user",
+    tags=["Webhook", "Security"],
+)
+async def get_my_webhook_info(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Get webhook configuration for authenticated user.
+    
+    Returns metadata about the user's webhook setup without revealing the actual secret.
+    
+    Authentication: Requires valid JWT token (imported from app.api.v1.auth)
+    Time Complexity: O(1) - User already loaded from token
+    Space Complexity: O(1)
+    
+    Returns:
+        Dict containing webhook configuration status and URLs
+    """
+    from app.api.v1.auth import get_current_active_user
+    
+    current_user_dict = await get_current_active_user(request)
+    current_user = current_user_dict["user"]
+    
+    has_secret = bool(current_user.github_webhook_secret)
+    secret_preview = None
+    
+    if has_secret and current_user.github_webhook_secret:
+        secret = current_user.github_webhook_secret
+        if len(secret) > 8:
+            secret_preview = f"{secret[:4]}...{secret[-4:]}"
+        else:
+            secret_preview = "****"
+    
+    base_url = settings.api_url if hasattr(settings, 'api_url') else "https://your-server.com"
+    webhook_url = f"{base_url}/api/v1/webhook/github/{current_user.user_id}"
+    
+    return {
+        "user": {
+            "user_id": current_user.user_id,
+            "email": current_user.email,
+            "full_name": current_user.full_name,
+        },
+        "webhook_configuration": {
+            "secret_configured": has_secret,
+            "secret_preview": secret_preview,
+            "secret_length": len(current_user.github_webhook_secret) if has_secret else 0,
+            "webhook_url": webhook_url,
+            "last_updated": current_user.updated_at.isoformat() if current_user.updated_at else None,
+        },
+        "github_settings": {
+            "payload_url": webhook_url,
+            "content_type": "application/json",
+            "events": ["workflow_run", "check_run"],
+            "ssl_verification": "enabled",
+        },
+        "status": {
+            "ready": has_secret,
+            "message": "Webhook configured and ready" if has_secret else "No webhook secret configured - generate one first",
+        },
+        "actions": {
+            "generate_new_secret": f"{base_url}/api/v1/webhook/secret/generate/me",
+            "test_signature": f"{base_url}/api/v1/webhook/secret/test/me",
+            "webhook_endpoint": webhook_url,
+        },
+        "authentication": {
+            "method": "Path-based with HMAC-SHA256",
+            "complexity": "O(1) constant-time lookup",
+            "isolation": "Per-user endpoint for security",
+        },
+    }
+
+
+@router.get(
     "/webhook/secret/info",
     status_code=status.HTTP_200_OK,
-    summary="Get webhook secret information",
-    description="Get webhook secret metadata without revealing actual secret",
-    tags=["Webhook", "Security"],
+    summary="Get webhook secret information (admin)",
+    description="Get webhook secret metadata for specific user without revealing actual secret",
+    tags=["Webhook", "Security", "Admin"],
 )
 async def get_webhook_secret_info(
     user_id: str,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """
-    Get webhook secret configuration information.
+    Get webhook secret configuration information for specific user.
     
     Time Complexity: O(1) - Single database query
     Space Complexity: O(1)
+    
+    Args:
+        user_id: Target user ID
+        db: Database session
+        
+    Returns:
+        Dict containing webhook configuration metadata
     """
     from app.adapters.database.postgres.repositories.users import UserRepository
     
@@ -880,7 +1098,8 @@ async def get_webhook_secret_info(
         else:
             secret_preview = "****"
     
-    webhook_url = f"/api/v1/webhook/github/{user_id}"
+    base_url = settings.api_url if hasattr(settings, 'api_url') else "https://your-server.com"
+    webhook_url = f"{base_url}/api/v1/webhook/github/{user_id}"
     
     return {
         "user_id": user_id,
@@ -895,18 +1114,116 @@ async def get_webhook_secret_info(
             "isolation": "Per-user endpoint for security",
         },
         "actions": {
-            "generate_new": f"/api/v1/webhook/secret/generate?user_id={user_id}",
-            "test_signature": f"/api/v1/webhook/secret/test?user_id={user_id}",
+            "generate_new": f"{base_url}/api/v1/webhook/secret/generate?user_id={user_id}",
+            "test_signature": f"{base_url}/api/v1/webhook/secret/test?user_id={user_id}",
         },
+    }
+
+
+@router.post(
+    "/webhook/secret/test/me",
+    status_code=status.HTTP_200_OK,
+    summary="Test my webhook signature",
+    description="Generate test signature using authenticated user's webhook secret",
+    tags=["Webhook", "Security"],
+)
+async def test_my_webhook_signature(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Generate test signature for webhook payload using authenticated user's secret.
+    
+    This helps you:
+    - Test your webhook integration
+    - Verify signature generation
+    - Debug signature validation issues
+    
+    Authentication: Requires valid JWT token (imported from app.api.v1.auth)
+    Time Complexity: O(1) - Single HMAC computation
+    Space Complexity: O(n) where n is payload size
+    
+    Returns:
+        Dict containing generated signature and usage examples
+        
+    Example usage:
+        ```bash
+        curl -X POST "http://localhost:8000/api/v1/webhook/secret/test/me" \\
+          -H "Authorization: Bearer YOUR_JWT_TOKEN" \\
+          -H "Content-Type: application/json" \\
+          -d '{"action": "completed", "workflow_run": {"conclusion": "failure"}}'
+        ```
+    """
+    from app.api.v1.auth import get_current_active_user
+    
+    current_user_dict = await get_current_active_user(request)
+    current_user = current_user_dict["user"]
+    
+    if not current_user.github_webhook_secret:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No webhook secret configured. Generate one using POST /api/v1/webhook/secret/generate/me",
+        )
+    
+    body = await request.body()
+    
+    signature = hmac.new(
+        current_user.github_webhook_secret.encode(),
+        body,
+        hashlib.sha256,
+    ).hexdigest()
+    
+    payload_hash = hashlib.sha256(body).hexdigest()
+    
+    logger.info(
+        "webhook_test_signature_generated_authenticated",
+        user_id=current_user.user_id,
+        payload_size=len(body),
+        signature_prefix=signature[:16] + "...",
+    )
+    
+    base_url = settings.api_url if hasattr(settings, 'api_url') else "https://your-server.com"
+    webhook_url = f"{base_url}/api/v1/webhook/github/{current_user.user_id}"
+    
+    return {
+        "success": True,
+        "user": {
+            "user_id": current_user.user_id,
+            "email": current_user.email,
+        },
+        "test_results": {
+            "payload_hash": payload_hash,
+            "signature": signature,
+            "full_header_value": f"sha256={signature}",
+            "payload_size_bytes": len(body),
+        },
+        "webhook_url": webhook_url,
+        "how_to_use": {
+            "description": "Use this signature to test your webhook endpoint",
+            "header_name": "X-Hub-Signature-256",
+            "header_value": f"sha256={signature}",
+            "curl_example": f'''curl -X POST "{webhook_url}" \\
+  -H "Content-Type: application/json" \\
+  -H "X-Hub-Signature-256: sha256={signature}" \\
+  -H "X-GitHub-Event: workflow_run" \\
+  -H "X-GitHub-Delivery: test-{int(datetime.utcnow().timestamp())}" \\
+  --data '@payload.json' ''',
+        },
+        "verification": {
+            "algorithm": "HMAC-SHA256",
+            "encoding": "hexadecimal",
+            "constant_time_comparison": True,
+        },
+        "timestamp": datetime.utcnow().isoformat(),
     }
 
 
 @router.post(
     "/webhook/secret/test",
     status_code=status.HTTP_200_OK,
-    summary="Test webhook signature",
-    description="Generate test signature for payload verification",
-    tags=["Webhook", "Security"],
+    summary="Test webhook signature (admin)",
+    description="Generate test signature for specific user's webhook secret",
+    tags=["Webhook", "Security", "Admin"],
 )
 async def test_webhook_signature(
     request: Request,
@@ -914,10 +1231,18 @@ async def test_webhook_signature(
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """
-    Generate test signature for webhook payload.
+    Generate test signature for webhook payload using specific user's secret.
     
     Time Complexity: O(1) - Single database query + single HMAC computation
     Space Complexity: O(n) where n is payload size
+    
+    Args:
+        request: FastAPI request containing test payload
+        user_id: Target user ID
+        db: Database session
+        
+    Returns:
+        Dict containing generated signature and usage examples
     """
     from app.adapters.database.postgres.repositories.users import UserRepository
     
@@ -947,13 +1272,14 @@ async def test_webhook_signature(
     payload_hash = hashlib.sha256(body).hexdigest()
     
     logger.info(
-        "webhook_test_signature_generated",
+        "webhook_test_signature_generated_admin",
         user_id=user_id,
         payload_size=len(body),
         signature_prefix=signature[:16] + "...",
     )
     
-    webhook_url = f"/api/v1/webhook/github/{user_id}"
+    base_url = settings.api_url if hasattr(settings, 'api_url') else "https://your-server.com"
+    webhook_url = f"{base_url}/api/v1/webhook/github/{user_id}"
     
     return {
         "success": True,
@@ -966,7 +1292,7 @@ async def test_webhook_signature(
         "usage": {
             "header_name": "X-Hub-Signature-256",
             "header_value": f"sha256={signature}",
-            "example_curl": f'''curl -X POST http://localhost:8000{webhook_url} \\
+            "example_curl": f'''curl -X POST "{webhook_url}" \\
   -H "Content-Type: application/json" \\
   -H "X-Hub-Signature-256: sha256={signature}" \\
   -H "X-GitHub-Event: workflow_run" \\
