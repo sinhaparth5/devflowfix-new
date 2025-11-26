@@ -81,10 +81,17 @@ async def get_current_user(
         )
 
     try:
+        # Verify this is an access token (not refresh token)
         claims = auth_service.verify_access_token(credentials.credentials)
+        
+        # Get user from database
         user = auth_service.user_repo.get_by_id(claims.sub)
         
         if not user:
+            logger.warning(
+                "user_not_found_for_valid_token",
+                user_id=claims.sub,
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found",
@@ -96,9 +103,36 @@ async def get_current_user(
             "session_id": claims.session_id,
         }
     except AuthenticationError as e:
+        logger.info(
+            "authentication_failed",
+            error=e.message,
+            error_code=e.error_code,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=e.message,
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except ValueError as e:
+        # Handle Pydantic validation errors
+        logger.warning(
+            "token_validation_failed",
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or malformed token. Please use an access token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except Exception as e:
+        logger.error(
+            "unexpected_auth_error",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication failed",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -161,8 +195,20 @@ async def register(
             ip_address=client_info["ip_address"],
             user_agent=client_info["user_agent"],
         )
+        
+        logger.info(
+            "user_registered",
+            user_id=user.user_id,
+            email=user.email,
+        )
+        
         return UserResponse.model_validate(user)
     except AuthenticationError as e:
+        logger.info(
+            "registration_failed",
+            email=user_data.email,
+            error=e.message,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=e.message,
@@ -203,6 +249,12 @@ async def login(
             user_agent=client_info["user_agent"],
         )
         
+        logger.info(
+            "user_login_success",
+            user_id=user.user_id,
+            session_id=session_id,
+        )
+        
         return LoginResponse(
             access_token=access_token,
             refresh_token=refresh_token,
@@ -211,6 +263,12 @@ async def login(
             user=UserResponse.model_validate(user),
         )
     except AuthenticationError as e:
+        logger.info(
+            "login_failed",
+            email=login_data.email,
+            error=e.message,
+            error_code=e.error_code,
+        )
         if e.error_code == "account_locked":
             raise HTTPException(
                 status_code=status.HTTP_423_LOCKED,
@@ -250,6 +308,11 @@ async def refresh_token(
             user_agent=client_info["user_agent"],
         )
         
+        logger.info(
+            "tokens_refreshed",
+            ip_address=client_info["ip_address"],
+        )
+        
         return RefreshTokenResponse(
             access_token=new_access,
             refresh_token=new_refresh,
@@ -257,9 +320,23 @@ async def refresh_token(
             expires_in=settings.access_token_expire_minutes * 60,
         )
     except AuthenticationError as e:
+        logger.info(
+            "token_refresh_failed",
+            error=e.message,
+            error_code=e.error_code,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=e.message,
+        )
+    except ValueError as e:
+        logger.warning(
+            "invalid_refresh_token_format",
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token format",
         )
 
 
@@ -288,6 +365,13 @@ async def logout(
         all_sessions=logout_data.all_sessions,
         ip_address=client_info["ip_address"],
         user_agent=client_info["user_agent"],
+    )
+    
+    logger.info(
+        "user_logout",
+        user_id=current_user["user"].user_id,
+        sessions_revoked=sessions_revoked,
+        all_sessions=logout_data.all_sessions,
     )
     
     return LogoutResponse(
@@ -335,11 +419,21 @@ async def change_password(
             new_password=password_data.new_password,
         )
         
+        logger.info(
+            "password_changed",
+            user_id=current_user["user"].user_id,
+        )
+        
         return SuccessResponse(
             success=True,
             message="Password changed successfully. Please login again.",
         )
     except AuthenticationError as e:
+        logger.info(
+            "password_change_failed",
+            user_id=current_user["user"].user_id,
+            error=e.message,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=e.message,
@@ -385,11 +479,17 @@ async def confirm_password_reset(
     try:
         auth_service.reset_password(reset_data.token, reset_data.new_password)
         
+        logger.info("password_reset_completed")
+        
         return SuccessResponse(
             success=True,
             message="Password reset successfully. Please login with your new password.",
         )
     except AuthenticationError as e:
+        logger.info(
+            "password_reset_failed",
+            error=e.message,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=e.message,
@@ -423,6 +523,11 @@ async def setup_mfa(
             detail="MFA is already enabled",
         )
     
+    logger.info(
+        "mfa_setup_initiated",
+        user_id=current_user["user"].user_id,
+    )
+    
     return auth_service.setup_mfa(current_user["user"].user_id)
 
 
@@ -444,11 +549,21 @@ async def enable_mfa(
     try:
         auth_service.enable_mfa(current_user["user"].user_id, mfa_data.code)
         
+        logger.info(
+            "mfa_enabled",
+            user_id=current_user["user"].user_id,
+        )
+        
         return SuccessResponse(
             success=True,
             message="MFA enabled successfully",
         )
     except AuthenticationError as e:
+        logger.info(
+            "mfa_enable_failed",
+            user_id=current_user["user"].user_id,
+            error=e.message,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=e.message,
@@ -483,11 +598,21 @@ async def disable_mfa(
             mfa_data.code,
         )
         
+        logger.info(
+            "mfa_disabled",
+            user_id=current_user["user"].user_id,
+        )
+        
         return SuccessResponse(
             success=True,
             message="MFA disabled successfully",
         )
     except AuthenticationError as e:
+        logger.info(
+            "mfa_disable_failed",
+            user_id=current_user["user"].user_id,
+            error=e.message,
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=e.message,
@@ -553,6 +678,12 @@ async def revoke_session(
         reason=revoke_data.reason or "User revoked",
     )
     
+    logger.info(
+        "session_revoked",
+        user_id=current_user["user"].user_id,
+        session_id=revoke_data.session_id,
+    )
+    
     return SuccessResponse(
         success=True,
         message="Session revoked successfully",
@@ -577,6 +708,12 @@ async def create_api_key(
     """
     api_key, prefix = auth_service.create_api_key(current_user["user"].user_id)
     
+    logger.info(
+        "api_key_created",
+        user_id=current_user["user"].user_id,
+        prefix=prefix,
+    )
+    
     return APIKeyCreateResponse(
         api_key=api_key,
         prefix=prefix,
@@ -595,6 +732,11 @@ async def revoke_api_key(
 ):
     """Revoke the current API key."""
     auth_service.revoke_api_key(current_user["user"].user_id)
+    
+    logger.info(
+        "api_key_revoked",
+        user_id=current_user["user"].user_id,
+    )
     
     return SuccessResponse(
         success=True,
