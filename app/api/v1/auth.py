@@ -36,6 +36,7 @@ from app.core.schemas.users import (
     SessionListResponse,
     RevokeSessionRequest,
     APIKeyCreateResponse,
+    AccessTokenClaims,
 )
 from app.core.schemas.common import SuccessResponse, ErrorResponse
 
