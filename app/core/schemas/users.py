@@ -243,19 +243,33 @@ class APIKeyResponse(BaseModel):
     last_used_at: Optional[datetime] = None
 
 
-# Token Claims
+# Token Claims - UPDATED TO SUPPORT DIFFERENT TOKEN TYPES
 
-class TokenClaims(BaseModel):
-    """Schema for JWT token claims."""
+class BaseTokenClaims(BaseModel):
+    """Base claims present in all JWT tokens."""
     sub: str  # user_id
-    email: str
-    role: str
     token_version: int
     session_id: Optional[str] = None
     exp: int  # expiration timestamp
     iat: int  # issued at timestamp
     jti: str  # unique token ID
     type: str  # "access" or "refresh"
+
+
+class AccessTokenClaims(BaseTokenClaims):
+    """Claims for access tokens - includes full user context."""
+    email: str
+    role: str
+    type: str = Field(default="access")
+
+
+class RefreshTokenClaims(BaseTokenClaims):
+    """Claims for refresh tokens - minimal information only."""
+    type: str = Field(default="refresh")
+
+
+# Keep TokenClaims as an alias for backward compatibility
+TokenClaims = AccessTokenClaims
 
 
 # Audit Log Schemas

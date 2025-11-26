@@ -23,7 +23,8 @@ from app.adapters.database.postgres.repositories.users import (
 from app.core.schemas.users import (
     UserCreate,
     LoginRequest,
-    TokenClaims,
+    AccessTokenClaims,
+    RefreshTokenClaims,
     MFASetupResponse,
 )
 from app.exceptions import DevFlowFixException
@@ -158,16 +159,23 @@ class AuthService:
         """Hash a token for secure storage."""
         return hashlib.sha256(token.encode()).hexdigest()
 
-    def verify_access_token(self, token: str) -> TokenClaims:
+    def verify_access_token(self, token: str) -> AccessTokenClaims:
         """Verify and decode an access token."""
         try:
             payload = jwt.decode(token, settings.secret_key, algorithms=[JWT_ALGORITHM])
 
             if payload.get("type") != "access":
-                raise AuthenticationError("Invalid token type", "invalid_token")
+                raise AuthenticationError("Invalid token type. Expected access token.", "invalid_token")
+
+            # Validate with AccessTokenClaims (includes email and role)
+            try:
+                claims = AccessTokenClaims(**payload)
+            except ValueError as e:
+                logger.warning("access_token_validation_failed", error=str(e))
+                raise AuthenticationError("Invalid access token format", "invalid_token")
 
             # Verify user still exists and is active
-            user = self.user_repo.get_by_id(payload["sub"])
+            user = self.user_repo.get_by_id(claims.sub)
             if not user:
                 raise AuthenticationError("User not found", "user_not_found")
 
@@ -175,11 +183,11 @@ class AuthService:
                 raise AuthenticationError("User account is disabled", "account_disabled")
 
             # Verify token version (for token invalidation)
-            if payload.get("token_version") != user.token_version:
+            if claims.token_version != user.token_version:
                 raise AuthenticationError("Token has been revoked", "token_revoked")
 
             # Verify session is still valid
-            session_id = payload.get("session_id")
+            session_id = claims.session_id
             if session_id:
                 session = self.session_repo.get_active_session(session_id)
                 if not session:
@@ -188,32 +196,39 @@ class AuthService:
                 # Update session last used time
                 self.session_repo.update_last_used(session_id)
 
-            return TokenClaims(**payload)
+            return claims
 
         except JWTError as e:
             logger.warning("jwt_verification_failed", error=str(e))
             raise AuthenticationError("Invalid or expired token", "invalid_token")
 
-    def verify_refresh_token(self, token: str) -> Tuple[TokenClaims, UserTable]:
+    def verify_refresh_token(self, token: str) -> Tuple[RefreshTokenClaims, UserTable]:
         """Verify a refresh token and return claims with user."""
         try:
             payload = jwt.decode(token, settings.secret_key, algorithms=[JWT_ALGORITHM])
 
             if payload.get("type") != "refresh":
-                raise AuthenticationError("Invalid token type", "invalid_token")
+                raise AuthenticationError("Invalid token type. Expected refresh token.", "invalid_token")
 
-            user = self.user_repo.get_by_id(payload["sub"])
+            # Validate with RefreshTokenClaims (no email/role required)
+            try:
+                claims = RefreshTokenClaims(**payload)
+            except ValueError as e:
+                logger.warning("refresh_token_validation_failed", error=str(e))
+                raise AuthenticationError("Invalid refresh token format", "invalid_token")
+
+            user = self.user_repo.get_by_id(claims.sub)
             if not user:
                 raise AuthenticationError("User not found", "user_not_found")
 
             if not user.is_active:
                 raise AuthenticationError("User account is disabled", "account_disabled")
 
-            if payload.get("token_version") != user.token_version:
+            if claims.token_version != user.token_version:
                 raise AuthenticationError("Token has been revoked", "token_revoked")
 
             # Verify session
-            session_id = payload.get("session_id")
+            session_id = claims.session_id
             if session_id:
                 session = self.session_repo.get_active_session(session_id)
                 if not session:
@@ -243,7 +258,7 @@ class AuthService:
                         "token_reuse"
                     )
 
-            return TokenClaims(**payload), user
+            return claims, user
 
         except JWTError as e:
             logger.warning("refresh_token_verification_failed", error=str(e))
