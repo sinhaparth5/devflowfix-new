@@ -129,7 +129,7 @@ class ServiceContainer:
                 logger.warning("slack_token_not_configured")
         return self._notification_service
     
-    def get_analyzer_service(self):
+    def get_analyzer_service(self, db: Session):
         if self._analyzer_service is None:
             if self.llm_adapter:
                 from app.services.analyzer import AnalyzerService
@@ -137,7 +137,7 @@ class ServiceContainer:
                     settings=settings,
                     llm_client=self.llm_adapter,
                     embedder_service=self.embedding_adapter,
-                    retriever_service=self.get_retriever_service()
+                    retriever_service=self.get_retriever_service(db)
                 )
             else:
                 logger.warning("analyzer_service_not_available_no_llm")
@@ -240,10 +240,10 @@ def get_event_processor(db: Session = Depends(get_db)):
     return EventProcessor(
         incident_repository=incident_repo,
         vector_repository=vector_repo,
-        analyzer_service=container.get_analyzer_service(),
+        analyzer_service=container.get_analyzer_service(db),
         decision_service=container.get_decision_service(),
         remediator_service=container.get_remediator_service(),
-        retriever_service=container.get_retriever_service(),
+        retriever_service=container.get_retriever_service(db),
         notification_service=container.notification_service,
         embedding_adapter=container.embedding_adapter,
         default_environment=environment,
