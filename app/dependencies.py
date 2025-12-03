@@ -174,7 +174,7 @@ class ServiceContainer:
         Returns:
             RetrieverService with repository configured 
         """
-        if not self.embedding_adapter
+        if not self.embedding_adapter:
             logger.warning("retriever_service_not_available_no_embedding")
             return None
 
