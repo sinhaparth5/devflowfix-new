@@ -339,7 +339,6 @@ def extract_kubernetes_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     response_model=WebhookResponse,
     status_code=status.HTTP_200_OK,
     summary="GitHub webhook endpoint",
-    tags=["Webhook"],
 )
 async def receive_github_webhook(
     user_id: str,
@@ -426,7 +425,6 @@ async def receive_github_webhook(
     response_model=WebhookResponse,
     status_code=status.HTTP_200_OK,
     summary="GitHub webhook endpoint (synchronous)",
-    tags=["Webhook"],
 )
 async def receive_github_webhook_sync(
     user_id: str,
@@ -488,7 +486,6 @@ async def receive_github_webhook_sync(
     response_model=WebhookResponse,
     status_code=status.HTTP_200_OK,
     summary="ArgoCD webhook endpoint",
-    tags=["Webhook"],
 )
 async def receive_argocd_webhook(
     user_id: str,
@@ -546,7 +543,6 @@ async def receive_argocd_webhook(
     response_model=WebhookResponse,
     status_code=status.HTTP_200_OK,
     summary="Kubernetes event webhook endpoint",
-    tags=["Webhook"],
 )
 async def receive_kubernetes_webhook(
     user_id: str,
@@ -604,7 +600,6 @@ async def receive_kubernetes_webhook(
     response_model=WebhookResponse,
     status_code=status.HTTP_200_OK,
     summary="Generic webhook endpoint",
-    tags=["Webhook"],
 )
 async def receive_generic_webhook(
     user_id: str,
@@ -847,7 +842,7 @@ async def process_webhook_async(
     "/webhook/secret/generate/me",
     status_code=status.HTTP_201_CREATED,
     summary="Generate webhook secret for authenticated user",
-    tags=["Webhook", "Security"],
+    tags=["Webhooks", "Security"],
 )
 async def generate_my_webhook_secret(
     db: Session = Depends(get_db),
@@ -947,7 +942,7 @@ async def generate_my_webhook_secret(
     "/webhook/secret/generate",
     status_code=status.HTTP_201_CREATED,
     summary="Generate webhook secret (admin)",
-    tags=["Webhook", "Security", "Admin"],
+    tags=["Webhooks", "Security", "Admin"],
 )
 async def create_webhook_secret(
     user_id: str,
@@ -1008,7 +1003,7 @@ async def create_webhook_secret(
     "/webhook/secret/info/me",
     status_code=status.HTTP_200_OK,
     summary="Get my webhook configuration",
-    tags=["Webhook", "Security"],
+    tags=["Webhooks", "Security"],
 )
 async def get_my_webhook_info(
     db: Session = Depends(get_db),
@@ -1067,7 +1062,7 @@ async def get_my_webhook_info(
     "/webhook/secret/info",
     status_code=status.HTTP_200_OK,
     summary="Get webhook secret information (admin)",
-    tags=["Webhook", "Security", "Admin"],
+    tags=["Webhooks", "Security", "Admin"],
 )
 async def get_webhook_secret_info(
     user_id: str,
@@ -1118,7 +1113,7 @@ async def get_webhook_secret_info(
     "/webhook/secret/test/me",
     status_code=status.HTTP_200_OK,
     summary="Test my webhook signature",
-    tags=["Webhook", "Security"],
+    tags=["Webhooks", "Security"],
 )
 async def test_my_webhook_signature(
     request: Request,
@@ -1193,7 +1188,7 @@ async def test_my_webhook_signature(
     "/webhook/secret/test",
     status_code=status.HTTP_200_OK,
     summary="Test webhook signature (admin)",
-    tags=["Webhook", "Security", "Admin"],
+    tags=["Webhooks", "Security", "Admin"],
 )
 async def test_webhook_signature(
     request: Request,
@@ -1265,7 +1260,6 @@ async def test_webhook_signature(
     "/webhook/health",
     status_code=status.HTTP_200_OK,
     summary="Webhook health check",
-    tags=["Webhook"],
 )
 async def webhook_health() -> Dict[str, Any]:
     """
