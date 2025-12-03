@@ -164,16 +164,37 @@ class ServiceContainer:
             self._remediator_service = RemediatorService(settings=settings)
         return self._remediator_service
     
-    def get_retriever_service(self):
-        if self._retriever_service is None:
-            if self.embedding_adapter:
-                from app.services.retriever import RetrieverService
-                self._retriever_service = RetrieverService(
-                    embedding_adapter=self.embedding_adapter,
-                )
-            else:
-                logger.warning("retriever_service_not_available_no_embedding")
-        return self._retriever_service
+    def get_retriever_service(self, db: Session):
+        """
+        Get RetriverService with vector repository support
+        
+        Args:
+            db: Database session for vector operations
+
+        Returns:
+            RetrieverService with repository configured 
+        """
+        if not self.embedding_adapter
+            logger.warning("retriever_service_not_available_no_embedding")
+            return None
+
+        from app.services.retriever import RetrieverService
+        from app.adapters.database.postgres.vector import VectorRepository
+
+        vector_repo = VectorRepository(db)
+
+        retriever = RetrieverService(
+            embedding_adapter=self.embedding_adapter,
+            vector_repository=vector_repo,
+        )
+
+        logger.info(
+            "retriever_service_created_with_vector_repo",
+            has_embedding=True,
+            has_vector_repo=True,
+        )
+
+        return retriever
 
 
 def get_service_container() -> ServiceContainer:
