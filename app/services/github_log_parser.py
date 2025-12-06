@@ -185,30 +185,31 @@ class GitHubLogExtractor:
             async with GitHubClient(token=self.github_token) as client:
                 jobs = await client.list_jobs_for_workflow_run(owner=owner, repo=repo, run_id=run_id)
             
-            failed_jobs = [job for job in jobs if job.get("conclusion") == "failure"]
-            
-            if not failed_jobs:
-                logger.warning("github_no_failed_jobs", repo=f"{owner}/{repo}", run_id=run_id)
-                return ""
-            
-            all_errors = []
-            
-            for job in failed_jobs:
-                job_id = job.get("id")
-                job_name = job.get("name", "unknown")
+                failed_jobs = [job for job in jobs if job.get("conclusion") == "failure"]
                 
-                try:
-                    logs = await client.download_job_logs(owner=owner, repo=repo, job_id=job_id)
+                if not failed_jobs:
+                    logger.warning("github_no_failed_jobs", repo=f"{owner}/{repo}", run_id=run_id)
+                    return ""
+                
+                all_errors = []
+                
+                for job in failed_jobs:
+                    job_id = job.get("id")
+                    job_name = job.get("name", "unknown")
                     
-                    errors = self.parser.extract_errors(logs)
-                    for error in errors:
-                        error.step_name = f"{job_name} / {error.step_name}"
-                        all_errors.append(error)
-                    
-                except Exception as e:
-                    logger.warning("github_job_log_fetch_failed", job_id=job_id, error=str(e))
-                    continue
-            
+                    try:
+                        logs = await client.download_job_logs(owner=owner, repo=repo, job_id=job_id)
+                        
+                        errors = self.parser.extract_errors(logs)
+                        
+                        for error in errors:
+                            error.step_name = f"{job_name} / {error.step_name}"
+                            all_errors.append(error)
+                        
+                    except Exception as e:
+                        logger.warning("github_job_log_fetch_failed", job_id=job_id, error=str(e))
+                        continue
+                
                 if all_errors:
                     summary = self.parser.format_error_summary(all_errors)
                     
