@@ -17,6 +17,7 @@ from app.core.enums import IncidentSource
 from app.services.event_processor import EventProcessor
 from app.dependencies import get_db, get_event_processor, get_service_container
 from app.adapters.external.github.client import GitHubClient
+from app.services.github_log_parser import GitHubLogExtractor
 
 try:
     from app.api.v1.auth import get_current_active_user
@@ -332,7 +333,6 @@ def extract_kubernetes_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "reason": reason,
         },
     }
-
 
 @router.post(
     "/webhook/github/{user_id}",
@@ -662,128 +662,6 @@ async def receive_generic_webhook(
         message="Generic webhook received, processing started",
     )
 
-
-async def fetch_github_workflow_logs(
-    payload: Dict[str, Any],
-) -> str:
-    """
-    Fetch actual GitHub workflow job logs to include in error analysis.
-    
-    Args:
-        payload: GitHub webhook payload
-        
-    Returns:
-        Combined logs from all failed jobs
-    """
-    try:
-        context = payload.get("context", {})
-        repo = context.get("repository", "")
-        run_id = context.get("run_id")
-        
-        if not repo or not run_id or "/" not in repo:
-            logger.warning(
-                "github_logs_fetch_missing_context",
-                has_repo=bool(repo),
-                has_run_id=bool(run_id),
-            )
-            return ""
-        
-        owner, repo_name = repo.split("/", 1)
-        
-        async with GitHubClient() as client:
-            try:
-                # Get all jobs for this workflow run
-                jobs = await client.list_jobs_for_workflow_run(
-                    owner=owner,
-                    repo=repo_name,
-                    run_id=run_id,
-                )
-                
-                # Filter for failed jobs
-                failed_jobs = [
-                    job for job in jobs
-                    if job.get("conclusion") == "failure"
-                ]
-                
-                if not failed_jobs:
-                    logger.info(
-                        "github_no_failed_jobs",
-                        repo=repo,
-                        run_id=run_id,
-                        total_jobs=len(jobs),
-                    )
-                    return ""
-                
-                # Download logs from each failed job
-                all_logs = []
-                for job in failed_jobs:
-                    try:
-                        job_id = job.get("id")
-                        job_name = job.get("name", "unknown")
-                        
-                        logs = await client.download_job_logs(
-                            owner=owner,
-                            repo=repo_name,
-                            job_id=job_id,
-                        )
-                        
-                        all_logs.append(f"\n{'='*60}")
-                        all_logs.append(f"Job: {job_name}")
-                        all_logs.append(f"{'='*60}\n")
-                        all_logs.append(logs)
-                        
-                    except Exception as e:
-                        logger.warning(
-                            "github_job_log_fetch_failed",
-                            job_id=job.get("id"),
-                            job_name=job.get("name"),
-                            error=str(e),
-                        )
-                        continue
-                
-                combined_logs = "\n".join(all_logs)
-                
-                logger.info(
-                    "github_logs_fetched",
-                    repo=repo,
-                    run_id=run_id,
-                    failed_jobs_count=len(failed_jobs),
-                    logs_size_bytes=len(combined_logs),
-                )
-                
-                # Truncate logs if they're too large (keep ~3000 chars for embedding)
-                # This prevents "Input length exceeds maximum allowed token size" errors
-                if len(combined_logs) > 3500:
-                    logger.warning(
-                        "github_logs_truncated_for_embedding",
-                        original_size=len(combined_logs),
-                        truncated_size=3500,
-                    )
-                    # Keep beginning and end, as errors are usually at the end
-                    beginning = combined_logs[:1500]
-                    end = combined_logs[-2000:]
-                    combined_logs = f"{beginning}\n\n... [log truncated - keeping error summary] ...\n\n{end}"
-                
-                return combined_logs
-                
-            except Exception as e:
-                logger.error(
-                    "github_logs_fetch_client_error",
-                    repo=repo,
-                    run_id=run_id,
-                    error=str(e),
-                )
-                return ""
-    
-    except Exception as e:
-        logger.error(
-            "github_logs_fetch_unexpected_error",
-            error=str(e),
-            exc_info=True,
-        )
-        return ""
-
-
 async def process_webhook_async(
     event_processor: EventProcessor,
     payload: Dict[str, Any],
@@ -798,19 +676,45 @@ async def process_webhook_async(
         # Fetch actual GitHub logs if this is a GitHub webhook
         if source == IncidentSource.GITHUB:
             try:
-                workflow_logs = await fetch_github_workflow_logs(payload)
-                if workflow_logs:
-                    # Append actual logs to error_log
-                    current_error_log = payload.get("error_log", "")
-                    payload["error_log"] = f"{current_error_log}\n\n--- ACTUAL GITHUB WORKFLOW LOGS ---\n{workflow_logs}"
-                    
-                    logger.info(
-                        "github_logs_added_to_payload",
-                        incident_id=incident_id,
+                context = payload.get("context", {})
+                repo = context.get("repository", "")
+                run_id = context.get("run_id")
+
+                if repo and run_id and "/" in repo:
+                    owner, repo_name = repo.split("/", 1)
+
+                    log_extractor = GitHubLogExtractor()
+
+                    workflow_logs = await log_extractor.fetch_and_parse_logs(
+                        owner=owner,
+                        repo=repo_name,
+                        run_id=run_id
                     )
+
+                    if workflow_logs:
+                        current_error_log = payload.get("error_log", "")
+                        payload["error_log"] = (
+                            f"{current_error_log}\n\n"
+                            f"--- EXTRACTED ERRORS FROM GITHUB WORKFLOW ---\n"
+                            f"{workflow_logs}"
+                        )
+
+                        logger.info(
+                            "github_logs_added_to_payload",
+                            incident_id=incident_id,
+                            log_length=len(workflow_logs)
+                        )
+                else:
+                    logger.warning(
+                        "github_logs_missing_context",
+                        incident_id=incident_id,
+                        has_repo=bool(repo),
+                        has_run_id=bool(run_id),
+                    )
+
             except Exception as e:
                 logger.warning(
-                    "github_logs_fetch_skipped",
+                    "github_logs_fetch_failed",
                     incident_id=incident_id,
                     error=str(e),
                 )
