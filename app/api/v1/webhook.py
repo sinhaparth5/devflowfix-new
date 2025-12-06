@@ -651,53 +651,6 @@ async def receive_generic_webhook(
         message="Generic webhook received, processing started",
     )
 
-
-async def fetch_github_workflow_logs(
-    payload: Dict[str, Any],
-) -> str:
-    """
-    Fetch actual GitHub workflow job logs to include in error analysis.
-    
-    Args:
-        payload: GitHub webhook payload
-        
-    Returns:
-        Combined logs from all failed jobs
-    """
-    try:
-        context = payload.get("context", {})
-        repo = context.get("repository", "")
-        run_id = context.get("run_id")
-        
-        if not repo or not run_id or "/" not in repo:
-            logger.warning(
-                "github_logs_fetch_missing_context",
-                has_repo=bool(repo),
-                has_run_id=bool(run_id),
-            )
-            return ""
-        
-        owner, repo_name = repo.split("/", 1)
-
-        log_extractor = GitHubLogExtractor()
-        
-        error_summary = await log_extractor.fetch_and_parse_logs(
-            owner=owner,
-            repo=repo_name,
-            run_id=run_id
-        )
-
-        return error_summary
-    
-    except Exception as e:
-        logger.error(
-            "github_logs_fetch_unexpected_error",
-            error=str(e),
-            exc_info=True,
-        )
-        return ""
-
-
 async def process_webhook_async(
     event_processor: EventProcessor,
     payload: Dict[str, Any],
