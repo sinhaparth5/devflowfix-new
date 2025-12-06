@@ -17,6 +17,7 @@ from app.core.enums import IncidentSource
 from app.services.event_processor import EventProcessor
 from app.dependencies import get_db, get_event_processor, get_service_container
 from app.adapters.external.github.client import GitHubClient
+from app.services.github_log_parser import GitHubLogExtractor
 
 try:
     from app.api.v1.auth import get_current_active_user
@@ -316,7 +317,6 @@ def extract_kubernetes_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
             "reason": reason,
         },
     }
-
 
 @router.post(
     "/webhook/github/{user_id}",
@@ -678,91 +678,18 @@ async def fetch_github_workflow_logs(
             return ""
         
         owner, repo_name = repo.split("/", 1)
+
+        log_extractor = GitHubLogExtractor()
         
         async with GitHubClient() as client:
-            try:
-                # Get all jobs for this workflow run
-                jobs = await client.list_jobs_for_workflow_run(
-                    owner=owner,
-                    repo=repo_name,
-                    run_id=run_id,
-                )
-                
-                # Filter for failed jobs
-                failed_jobs = [
-                    job for job in jobs
-                    if job.get("conclusion") == "failure"
-                ]
-                
-                if not failed_jobs:
-                    logger.info(
-                        "github_no_failed_jobs",
-                        repo=repo,
-                        run_id=run_id,
-                        total_jobs=len(jobs),
-                    )
-                    return ""
-                
-                # Download logs from each failed job
-                all_logs = []
-                for job in failed_jobs:
-                    try:
-                        job_id = job.get("id")
-                        job_name = job.get("name", "unknown")
-                        
-                        logs = await client.download_job_logs(
-                            owner=owner,
-                            repo=repo_name,
-                            job_id=job_id,
-                        )
-                        
-                        all_logs.append(f"\n{'='*60}")
-                        all_logs.append(f"Job: {job_name}")
-                        all_logs.append(f"{'='*60}\n")
-                        all_logs.append(logs)
-                        
-                    except Exception as e:
-                        logger.warning(
-                            "github_job_log_fetch_failed",
-                            job_id=job.get("id"),
-                            job_name=job.get("name"),
-                            error=str(e),
-                        )
-                        continue
-                
-                combined_logs = "\n".join(all_logs)
-                
-                logger.info(
-                    "github_logs_fetched",
-                    repo=repo,
-                    run_id=run_id,
-                    failed_jobs_count=len(failed_jobs),
-                    logs_size_bytes=len(combined_logs),
-                )
-                
-                # Truncate logs if they're too large (keep ~3000 chars for embedding)
-                # This prevents "Input length exceeds maximum allowed token size" errors
-                if len(combined_logs) > 3500:
-                    logger.warning(
-                        "github_logs_truncated_for_embedding",
-                        original_size=len(combined_logs),
-                        truncated_size=3500,
-                    )
-                    # Keep beginning and end, as errors are usually at the end
-                    beginning = combined_logs[:1500]
-                    end = combined_logs[-2000:]
-                    combined_logs = f"{beginning}\n\n... [log truncated - keeping error summary] ...\n\n{end}"
-                
-                return combined_logs
-                
-            except Exception as e:
-                logger.error(
-                    "github_logs_fetch_client_error",
-                    repo=repo,
-                    run_id=run_id,
-                    error=str(e),
-                )
-                return ""
+            error_summary = await log_extractor(
+                github_client=client,
+                owner=owner,
+                repo=repo_name,
+                run_id=run_id
+            )
+
+            return error_summary
     
     except Exception as e:
         logger.error(
