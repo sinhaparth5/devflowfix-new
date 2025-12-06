@@ -712,19 +712,45 @@ async def process_webhook_async(
         # Fetch actual GitHub logs if this is a GitHub webhook
         if source == IncidentSource.GITHUB:
             try:
-                workflow_logs = await fetch_github_workflow_logs(payload)
-                if workflow_logs:
-                    # Append actual logs to error_log
-                    current_error_log = payload.get("error_log", "")
-                    payload["error_log"] = f"{current_error_log}\n\n--- ACTUAL GITHUB WORKFLOW LOGS ---\n{workflow_logs}"
-                    
-                    logger.info(
-                        "github_logs_added_to_payload",
-                        incident_id=incident_id,
+                context = payload.get("context", {})
+                repo = context.get("repository", "")
+                run_id = context.get("run_id")
+
+                if repo and run_id and "/" in repo:
+                    owner, repo_name = repo.split("/", 1)
+
+                    log_extractor = GitHubLogExtractor()
+
+                    workflow_logs = await log_extractor.fetch_and_parse_logs(
+                        owner=owner,
+                        repo=repo_name,
+                        run_id=run_id
                     )
+
+                    if workflow_logs:
+                        current_error_log = payload.get("error_log", "")
+                        payload["error_log"] = (
+                            f"{current_error_log}\n\n"
+                            f"--- EXTRACTED ERRORS FROM GITHUB WORKFLOW ---\n"
+                            f"{workflow_logs}"
+                        )
+
+                        logger.info(
+                            "github_logs_added_to_payload",
+                            incident_id=incident_id,
+                            log_length=len(workflow_logs)
+                        )
+                else:
+                    logger.warning(
+                        "github_logs_missing_context",
+                        incident_id=incident_id,
+                        has_repo=bool(repo),
+                        has_run_id=bool(run_id),
+                    )
+
             except Exception as e:
                 logger.warning(
-                    "github_logs_fetch_skipped",
+                    "github_logs_fetch_failed",
                     incident_id=incident_id,
                     error=str(e),
                 )
