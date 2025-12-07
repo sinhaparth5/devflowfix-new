@@ -62,6 +62,7 @@ class EmbeddingAdapter:
             Embedding vector
         """
         # Truncate text if it exceeds max length to avoid token limit errors
+        print(text)
         if len(text) > max_length:
             logger.warning(
                 "embedding_text_truncated",
