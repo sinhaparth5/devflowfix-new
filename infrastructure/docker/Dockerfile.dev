@@ -15,8 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --prefix=/install --no-cache-dir --upgrade pip && \
-    pip install --prefix=/install --no-cache-dir -r requirements.txt
+RUN python -m pip install --prefix=/install --no-cache-dir --upgrade pip && \
+    python -m pip install --prefix=/install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 RUN python -m compileall -q app/
@@ -28,9 +28,8 @@ LABEL maintainer="Parth Sinha and Shine Gupta"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app \
     PATH="/install/bin:$PATH" \
-    PYTHONPATH="/install/lib/python3.12/site-packages:$PYTHONPATH"
+    PYTHONPATH="/app:/install/lib/python3.12/site-packages"
 
 WORKDIR /app
 
@@ -53,7 +52,7 @@ USER appuser
 
 EXPOSE 8000
 
-CMD gunicorn app.main:app \
+CMD ["sh", "-c", "gunicorn app.main:app \
     --worker-class uvicorn.workers.UvicornWorker \
     --workers ${WORKERS:-4} \
     --worker-connections 1000 \
@@ -66,4 +65,4 @@ CMD gunicorn app.main:app \
     --access-logfile - \
     --error-logfile - \
     --log-level ${LOG_LEVEL:-info} \
-    --preload
+    --preload"]
