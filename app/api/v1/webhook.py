@@ -690,11 +690,9 @@ async def process_webhook_async(
                     )
                     
                     if workflow_logs:
-                        # CHANGED: Replace instead of append
                         payload["error_log"] = f"""GitHub Workflow Failed
 Repository: {context.get('repository', 'unknown')}
 Branch: {context.get('branch', 'unknown')}
-Workflow: {context.get('workflow', 'unknown')}
 
 --- EXTRACTED ERRORS ---
 {workflow_logs}"""
