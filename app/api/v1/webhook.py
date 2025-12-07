@@ -298,7 +298,6 @@ def extract_argocd_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         },
     }
 
-
 def extract_kubernetes_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Extract and normalize Kubernetes webhook payload.
@@ -418,7 +417,6 @@ async def receive_github_webhook(
         queued=True,
         message="GitHub failure detected, processing started",
     )
-
 
 @router.post(
     "/webhook/github/{user_id}/sync",
