@@ -673,32 +673,32 @@ async def process_webhook_async(
     Process webhook event asynchronously.
     """
     try:
-        # Fetch actual GitHub logs if this is a GitHub webhook
         if source == IncidentSource.GITHUB:
             try:
                 context = payload.get("context", {})
                 repo = context.get("repository", "")
                 run_id = context.get("run_id")
-
+                
                 if repo and run_id and "/" in repo:
                     owner, repo_name = repo.split("/", 1)
-
                     log_extractor = GitHubLogExtractor()
-
+                    
                     workflow_logs = await log_extractor.fetch_and_parse_logs(
                         owner=owner,
                         repo=repo_name,
                         run_id=run_id
                     )
-
+                    
                     if workflow_logs:
-                        current_error_log = payload.get("error_log", "")
-                        payload["error_log"] = (
-                            f"{current_error_log}\n\n"
-                            f"--- EXTRACTED ERRORS FROM GITHUB WORKFLOW ---\n"
-                            f"{workflow_logs}"
-                        )
+                        # CHANGED: Replace instead of append
+                        payload["error_log"] = f"""GitHub Workflow Failed
+Repository: {context.get('repository', 'unknown')}
+Branch: {context.get('branch', 'unknown')}
+Workflow: {context.get('workflow', 'unknown')}
 
+--- EXTRACTED ERRORS ---
+{workflow_logs}"""
+                        
                         logger.info(
                             "github_logs_added_to_payload",
                             incident_id=incident_id,
@@ -711,7 +711,6 @@ async def process_webhook_async(
                         has_repo=bool(repo),
                         has_run_id=bool(run_id),
                     )
-
             except Exception as e:
                 logger.warning(
                     "github_logs_fetch_failed",
@@ -740,7 +739,6 @@ async def process_webhook_async(
             error=str(e),
             exc_info=True,
         )
-
 
 @router.post(
     "/webhook/secret/generate/me",
