@@ -174,31 +174,37 @@ class GitHubLogParser:
         lines = []
         total_errors = sum(g.count for g in error_groups)
         
-        lines.append(f"ERRORS DETECTED: {total_errors} unique issues")
+        lines.append(f"Found {total_errors} unique error(s) across {len(error_groups)} type(s)")
         lines.append("")
         
         for idx, group in enumerate(error_groups, 1):
             if idx > 3:
                 remaining = len(error_groups) - 3
-                lines.append(f"\n... and {remaining} more error group(s)")
+                lines.append(f"\n... and {remaining} more error type(s)")
                 break
             
-            lines.append(f"{idx}. {group.error_type.upper()} in '{group.step_name}' [{group.severity}]")
+            lines.append(f"{idx}. {group.error_type.upper()} [{group.severity}]")
+            lines.append(f"   Step: {group.step_name}")
             
             file_count = 0
-            for file_path, messages in group.files.items():
+            for file_path, messages in sorted(group.files.items()):
                 if file_count >= self.max_errors_per_type:
-                    lines.append(f"   ... {len(group.files) - file_count} more files")
+                    lines.append(f"   ... and {len(group.files) - file_count} more file(s)")
                     break
                 
                 if file_path != "_general":
-                    lines.append(f"   📄 {file_path}")
+                    # Extract just the filename from full path
+                    filename = file_path.split('/')[-1]
+                    lines.append(f"   📄 {filename}")
                 
-                for msg in messages[:3]:
+                # Deduplicate messages within the file
+                unique_messages = list(dict.fromkeys(messages))
+                
+                for msg in unique_messages[:3]:
                     lines.append(f"      • {msg}")
                 
-                if len(messages) > 3:
-                    lines.append(f"      ... {len(messages) - 3} more in this file")
+                if len(unique_messages) > 3:
+                    lines.append(f"      ... and {len(unique_messages) - 3} more error(s)")
                 
                 file_count += 1
             
@@ -207,7 +213,7 @@ class GitHubLogParser:
         summary = "\n".join(lines)
         
         if len(summary) > self.max_total_length:
-            summary = summary[:self.max_total_length] + "\n... [truncated]"
+            summary = summary[:self.max_total_length] + "\n... [output truncated]"
         
         return summary
     
