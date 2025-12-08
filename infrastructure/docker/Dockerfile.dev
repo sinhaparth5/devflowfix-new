@@ -39,7 +39,8 @@ COPY --from=builder --chown=nonroot:nonroot /build/app ./app
 
 EXPOSE 8000
 
-CMD ["/usr/bin/python3", "-m", "gunicorn", "app.main:app", \
+# Chainguard Python images have ENTRYPOINT set to python, so just use CMD
+CMD ["-m", "gunicorn", "app.main:app", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
      "--workers", "4", \
      "--worker-connections", "1000", \
