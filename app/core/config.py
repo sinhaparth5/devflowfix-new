@@ -47,11 +47,28 @@ class GitHubSettings(BaseSettings):
 
 class AWSSettings(BaseSettings):
     """AWS configuration."""
-    
+
     region: str = Field(default="us-east-1", alias="AWS_REGION")
     lambda_function_name: Optional[str] = Field(default=None, alias="AWS_LAMBDA_FUNCTION_NAME")
     account_id: Optional[str] = Field(default=None, alias="AWS_ACCOUNT_ID")
-    
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+
+class BackblazeSettings(BaseSettings):
+    """Backblaze B2 configuration."""
+
+    key_id: str = Field(default="", alias="BACKBLAZE_KEY_ID")
+    application_key: str = Field(default="", alias="BACKBLAZE_APPLICATION_KEY")
+    bucket_name: str = Field(default="", alias="BACKBLAZE_BUCKET_NAME")
+    endpoint_url: str = Field(default="", alias="BACKBLAZE_ENDPOINT_URL")
+    region: str = Field(default="us-west-001", alias="BACKBLAZE_REGION")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -745,7 +762,12 @@ class Settings(BaseSettings):
     def rate_limit(self) -> RateLimitSettings:
         """Get rate limit settings."""
         return RateLimitSettings()
-    
+
+    @property
+    def backblaze(self) -> BackblazeSettings:
+        """Get Backblaze settings."""
+        return BackblazeSettings()
+
     # Methods
     def get_blast_radius_limit(self, time_window: str = "hour") -> int:
         """
