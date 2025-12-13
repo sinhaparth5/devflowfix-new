@@ -3,7 +3,7 @@
 
 from datetime import datetime, timezone
 from typing import Optional, Annotated
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Header, File, UploadFile, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 import structlog
@@ -256,6 +256,128 @@ async def register(
         )
 
 
+@router.post(
+    "/register/with-avatar",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Register a new user with avatar file upload",
+    responses={
+        400: {"model": ErrorResponse, "description": "Email already exists or validation error"},
+    },
+)
+async def register_with_avatar_file(
+    email: str = Form(..., description="User email address"),
+    password: str = Form(..., description="User password"),
+    full_name: Optional[str] = Form(None, description="Full name"),
+    avatar_file: Optional[UploadFile] = File(None, description="Avatar image file"),
+    request: Request = None,
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    """
+    Register a new user account with direct avatar file upload.
+
+    Password requirements:
+    - At least 8 characters
+    - At least one uppercase letter
+    - At least one lowercase letter
+    - At least one digit
+    - At least one special character
+
+    Avatar upload:
+    - Upload an image file directly (optional)
+    - Supported formats: PNG, JPEG, GIF, WebP
+    - Max file size: 5MB
+    - Image will be uploaded to Backblaze B2 bucket
+    """
+    client_info = get_client_info(request)
+
+    try:
+        # Create UserCreate object for validation
+        user_data = UserCreate(
+            email=email,
+            password=password,
+            full_name=full_name
+        )
+
+        # First create the user
+        user = auth_service.register_user(
+            user_data,
+            ip_address=client_info["ip_address"],
+            user_agent=client_info["user_agent"],
+        )
+
+        # Handle avatar upload if provided
+        if avatar_file:
+            try:
+                # Validate content type
+                allowed_types = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"]
+                if avatar_file.content_type not in allowed_types:
+                    logger.warning(
+                        "invalid_avatar_content_type",
+                        user_id=user.user_id,
+                        content_type=avatar_file.content_type,
+                    )
+                    raise ValueError(f"Invalid file type. Allowed: {', '.join(allowed_types)}")
+
+                # Read file content
+                avatar_bytes = await avatar_file.read()
+
+                # Validate file size (5MB max)
+                max_size = 5 * 1024 * 1024  # 5MB
+                if len(avatar_bytes) > max_size:
+                    logger.warning(
+                        "avatar_file_too_large",
+                        user_id=user.user_id,
+                        size=len(avatar_bytes),
+                    )
+                    raise ValueError(f"File too large. Maximum size: {max_size / 1024 / 1024}MB")
+
+                # Upload to Backblaze
+                storage_service = get_storage_service()
+                avatar_url = storage_service.upload_avatar(
+                    file_content=avatar_bytes,
+                    user_id=user.user_id,
+                    content_type=avatar_file.content_type
+                )
+
+                # Update user with avatar URL
+                user.avatar_url = avatar_url
+                auth_service.user_repo.db.commit()
+                auth_service.user_repo.db.refresh(user)
+
+                logger.info(
+                    "user_avatar_uploaded",
+                    user_id=user.user_id,
+                    avatar_url=avatar_url,
+                    file_size=len(avatar_bytes),
+                )
+            except Exception as avatar_error:
+                # Log the error but don't fail registration
+                logger.warning(
+                    "avatar_upload_failed_during_registration",
+                    user_id=user.user_id,
+                    error=str(avatar_error),
+                )
+
+        logger.info(
+            "user_registered",
+            user_id=user.user_id,
+            email=user.email,
+        )
+
+        return UserResponse.model_validate(user)
+    except AuthenticationError as e:
+        logger.info(
+            "registration_failed",
+            email=email,
+            error=e.message,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=e.message,
+        )
+
+
 # Login/Logout
 
 @router.post(
@@ -436,45 +558,42 @@ async def get_current_user_profile(
     return UserDetailResponse.model_validate(current_user["user"])
 
 
-@router.put(
+@router.post(
     "/me/avatar",
     response_model=UserResponse,
-    summary="Update user avatar",
+    summary="Update user avatar (file upload)",
 )
-async def update_user_avatar(
-    avatar_data: str,
-    avatar_content_type: str = "image/png",
+async def update_user_avatar_file(
+    avatar_file: UploadFile = File(..., description="Avatar image file"),
     current_user: dict = Depends(get_current_active_user),
     auth_service: AuthService = Depends(get_auth_service),
 ):
     """
-    Update the current user's avatar.
+    Update the current user's avatar using direct file upload.
 
-    Provide avatar_data as base64 encoded image data.
+    Upload an image file directly.
     Supported formats: PNG, JPEG, GIF, WebP.
+    Max file size: 5MB (recommended).
     The image will be uploaded to Backblaze B2 bucket.
     """
     try:
         # Validate content type
         allowed_types = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"]
-        if avatar_content_type.lower() not in allowed_types:
+        if avatar_file.content_type not in allowed_types:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid content type. Allowed: {', '.join(allowed_types)}",
+                detail=f"Invalid file type: {avatar_file.content_type}. Allowed: {', '.join(allowed_types)}",
             )
 
-        # Decode base64 avatar data
-        try:
-            avatar_bytes = base64.b64decode(avatar_data)
-        except Exception as decode_error:
-            logger.warning(
-                "avatar_decode_failed",
-                user_id=current_user["user"].user_id,
-                error=str(decode_error),
-            )
+        # Read file content
+        avatar_bytes = await avatar_file.read()
+
+        # Validate file size (5MB max)
+        max_size = 5 * 1024 * 1024  # 5MB
+        if len(avatar_bytes) > max_size:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid base64 encoded data",
+                detail=f"File too large. Maximum size: {max_size / 1024 / 1024}MB",
             )
 
         # Delete old avatar if exists
@@ -496,7 +615,7 @@ async def update_user_avatar(
         avatar_url = storage_service.upload_avatar(
             file_content=avatar_bytes,
             user_id=user.user_id,
-            content_type=avatar_content_type.lower()
+            content_type=avatar_file.content_type
         )
 
         # Update user with new avatar URL
@@ -509,6 +628,7 @@ async def update_user_avatar(
             "user_avatar_updated",
             user_id=user.user_id,
             avatar_url=avatar_url,
+            file_size=len(avatar_bytes),
         )
 
         return UserResponse.model_validate(user)
