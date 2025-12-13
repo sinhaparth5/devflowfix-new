@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 import structlog
+import base64
 
 from app.dependencies import get_db
 from app.adapters.database.postgres.repositories.users import (
@@ -15,6 +16,7 @@ from app.adapters.database.postgres.repositories.users import (
     AuditLogRepository,
 )
 from app.services.auth import AuthService, AuthenticationError
+from app.services.storage import get_storage_service
 from app.core.config import settings
 from app.core.schemas.users import (
     UserCreate,
@@ -180,29 +182,67 @@ async def register(
 ):
     """
     Register a new user account.
-    
+
     Password requirements:
     - At least 8 characters
     - At least one uppercase letter
     - At least one lowercase letter
     - At least one digit
     - At least one special character
+
+    Avatar upload:
+    - Provide avatar_data as base64 encoded image data
+    - Supported formats: PNG, JPEG, GIF, WebP
+    - Image will be uploaded to Backblaze B2 bucket
     """
     client_info = get_client_info(request)
-    
+
     try:
+        # First create the user
         user = auth_service.register_user(
             user_data,
             ip_address=client_info["ip_address"],
             user_agent=client_info["user_agent"],
         )
-        
+
+        # Handle avatar upload if provided
+        if user_data.avatar_data:
+            try:
+                # Decode base64 avatar data
+                avatar_bytes = base64.b64decode(user_data.avatar_data)
+
+                # Upload to Backblaze
+                storage_service = get_storage_service()
+                avatar_url = storage_service.upload_avatar(
+                    file_content=avatar_bytes,
+                    user_id=user.user_id,
+                    content_type=user_data.avatar_content_type or "image/png"
+                )
+
+                # Update user with avatar URL
+                user.avatar_url = avatar_url
+                auth_service.user_repo.db.commit()
+                auth_service.user_repo.db.refresh(user)
+
+                logger.info(
+                    "user_avatar_uploaded",
+                    user_id=user.user_id,
+                    avatar_url=avatar_url,
+                )
+            except Exception as avatar_error:
+                # Log the error but don't fail registration
+                logger.warning(
+                    "avatar_upload_failed_during_registration",
+                    user_id=user.user_id,
+                    error=str(avatar_error),
+                )
+
         logger.info(
             "user_registered",
             user_id=user.user_id,
             email=user.email,
         )
-        
+
         return UserResponse.model_validate(user)
     except AuthenticationError as e:
         logger.info(
@@ -394,6 +434,98 @@ async def get_current_user_profile(
 ):
     """Get the current authenticated user's profile."""
     return UserDetailResponse.model_validate(current_user["user"])
+
+
+@router.put(
+    "/me/avatar",
+    response_model=UserResponse,
+    summary="Update user avatar",
+)
+async def update_user_avatar(
+    avatar_data: str,
+    avatar_content_type: str = "image/png",
+    current_user: dict = Depends(get_current_active_user),
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    """
+    Update the current user's avatar.
+
+    Provide avatar_data as base64 encoded image data.
+    Supported formats: PNG, JPEG, GIF, WebP.
+    The image will be uploaded to Backblaze B2 bucket.
+    """
+    try:
+        # Validate content type
+        allowed_types = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"]
+        if avatar_content_type.lower() not in allowed_types:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid content type. Allowed: {', '.join(allowed_types)}",
+            )
+
+        # Decode base64 avatar data
+        try:
+            avatar_bytes = base64.b64decode(avatar_data)
+        except Exception as decode_error:
+            logger.warning(
+                "avatar_decode_failed",
+                user_id=current_user["user"].user_id,
+                error=str(decode_error),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid base64 encoded data",
+            )
+
+        # Delete old avatar if exists
+        user = current_user["user"]
+        if user.avatar_url:
+            try:
+                storage_service = get_storage_service()
+                storage_service.delete_avatar(user.avatar_url)
+            except Exception as delete_error:
+                # Log but don't fail the update
+                logger.warning(
+                    "old_avatar_delete_failed",
+                    user_id=user.user_id,
+                    error=str(delete_error),
+                )
+
+        # Upload new avatar to Backblaze
+        storage_service = get_storage_service()
+        avatar_url = storage_service.upload_avatar(
+            file_content=avatar_bytes,
+            user_id=user.user_id,
+            content_type=avatar_content_type.lower()
+        )
+
+        # Update user with new avatar URL
+        user.avatar_url = avatar_url
+        user.updated_at = datetime.now(timezone.utc)
+        auth_service.user_repo.db.commit()
+        auth_service.user_repo.db.refresh(user)
+
+        logger.info(
+            "user_avatar_updated",
+            user_id=user.user_id,
+            avatar_url=avatar_url,
+        )
+
+        return UserResponse.model_validate(user)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "avatar_update_failed",
+            user_id=current_user["user"].user_id,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update avatar",
+        )
 
 
 # Password Management

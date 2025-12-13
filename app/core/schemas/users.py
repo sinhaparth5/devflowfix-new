@@ -16,7 +16,9 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     """Schema for creating a new user (registration)."""
     password: str = Field(..., min_length=8, max_length=128, description="Password")
-    
+    avatar_data: Optional[str] = Field(None, description="Base64 encoded avatar image data")
+    avatar_content_type: Optional[str] = Field(default="image/png", description="MIME type of avatar image")
+
     @field_validator('password')
     @classmethod
     def validate_password(cls, v):
@@ -33,14 +35,38 @@ class UserCreate(UserBase):
             raise ValueError('Password must contain at least one special character')
         return v
 
+    @field_validator('avatar_content_type')
+    @classmethod
+    def validate_avatar_content_type(cls, v):
+        """Validate avatar content type."""
+        if v is None:
+            return v
+        allowed_types = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"]
+        if v.lower() not in allowed_types:
+            raise ValueError(f'Avatar content type must be one of: {", ".join(allowed_types)}')
+        return v.lower()
+
 
 class UserUpdate(BaseModel):
     """Schema for updating a user."""
     full_name: Optional[str] = Field(None, max_length=255)
     avatar_url: Optional[str] = Field(None, max_length=500)
+    avatar_data: Optional[str] = Field(None, description="Base64 encoded avatar image data")
+    avatar_content_type: Optional[str] = Field(default="image/png", description="MIME type of avatar image")
     preferences: Optional[dict] = None
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator('avatar_content_type')
+    @classmethod
+    def validate_avatar_content_type(cls, v):
+        """Validate avatar content type."""
+        if v is None:
+            return v
+        allowed_types = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"]
+        if v.lower() not in allowed_types:
+            raise ValueError(f'Avatar content type must be one of: {", ".join(allowed_types)}')
+        return v.lower()
 
 
 class UserResponse(UserBase):
