@@ -53,6 +53,9 @@ class UserUpdate(BaseModel):
     avatar_url: Optional[str] = Field(None, max_length=500)
     avatar_data: Optional[str] = Field(None, description="Base64 encoded avatar image data")
     avatar_content_type: Optional[str] = Field(default="image/png", description="MIME type of avatar image")
+    github_username: Optional[str] = Field(None, max_length=50, description="GitHub username")
+    organization_id: Optional[str] = Field(None, max_length=50, description="Organization ID")
+    team_id: Optional[str] = Field(None, max_length=50, description="Team ID")
     preferences: Optional[dict] = None
 
     model_config = ConfigDict(extra="forbid")

@@ -20,6 +20,7 @@ from app.services.storage import get_storage_service
 from app.core.config import settings
 from app.core.schemas.users import (
     UserCreate,
+    UserUpdate,
     UserResponse,
     UserDetailResponse,
     LoginRequest,
@@ -556,6 +557,120 @@ async def get_current_user_profile(
 ):
     """Get the current authenticated user's profile."""
     return UserDetailResponse.model_validate(current_user["user"])
+
+
+@router.patch(
+    "/me",
+    response_model=UserResponse,
+    summary="Update current user profile",
+)
+async def update_current_user_profile(
+    update_data: UserUpdate,
+    current_user: dict = Depends(get_current_active_user),
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    """
+    Update the current authenticated user's profile.
+
+    Only fields provided in the request will be updated.
+    Fields that are not provided or are null will keep their existing values.
+
+    Updatable fields:
+    - full_name: User's full name
+    - avatar_data: Base64 encoded avatar image (optional)
+    - avatar_content_type: MIME type for avatar (default: image/png)
+    - github_username: GitHub username
+    - organization_id: Organization ID
+    - team_id: Team ID
+    - preferences: User preferences as a JSON object
+    """
+    try:
+        user = current_user["user"]
+        update_dict = update_data.model_dump(exclude_unset=True, exclude_none=True)
+
+        # Handle avatar upload if provided
+        if "avatar_data" in update_dict:
+            try:
+                # Decode base64 avatar data
+                avatar_bytes = base64.b64decode(update_dict["avatar_data"])
+
+                # Delete old avatar if exists
+                if user.avatar_url:
+                    try:
+                        storage_service = get_storage_service()
+                        storage_service.delete_avatar(user.avatar_url)
+                    except Exception as delete_error:
+                        logger.warning(
+                            "old_avatar_delete_failed",
+                            user_id=user.user_id,
+                            error=str(delete_error),
+                        )
+
+                # Upload new avatar to Backblaze
+                storage_service = get_storage_service()
+                avatar_url = storage_service.upload_avatar(
+                    file_content=avatar_bytes,
+                    user_id=user.user_id,
+                    content_type=update_dict.get("avatar_content_type", "image/png")
+                )
+
+                user.avatar_url = avatar_url
+
+                logger.info(
+                    "user_avatar_updated_via_profile",
+                    user_id=user.user_id,
+                    avatar_url=avatar_url,
+                )
+            except Exception as avatar_error:
+                logger.error(
+                    "avatar_upload_failed_in_profile_update",
+                    user_id=user.user_id,
+                    error=str(avatar_error),
+                    error_type=type(avatar_error).__name__,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Failed to upload avatar: {str(avatar_error)}",
+                )
+
+            # Remove avatar_data and avatar_content_type from update_dict
+            # as they're not direct model fields
+            update_dict.pop("avatar_data", None)
+            update_dict.pop("avatar_content_type", None)
+
+        # Update user fields that were provided
+        for field, value in update_dict.items():
+            if hasattr(user, field):
+                setattr(user, field, value)
+
+        # Update timestamp
+        user.updated_at = datetime.now(timezone.utc)
+
+        # Save to database
+        auth_service.user_repo.db.commit()
+        auth_service.user_repo.db.refresh(user)
+
+        logger.info(
+            "user_profile_updated",
+            user_id=user.user_id,
+            updated_fields=list(update_dict.keys()),
+        )
+
+        return UserResponse.model_validate(user)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "profile_update_failed",
+            user_id=current_user["user"].user_id,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update profile",
+        )
 
 
 @router.post(
