@@ -77,6 +77,7 @@ class UserResponse(UserBase):
     user_id: str
     full_name: Optional[str] = None
     avatar_url: Optional[str] = None
+    github_username: Optional[str] = None
     organization_id: Optional[str] = None
     team_id: Optional[str] = None
     role: str
