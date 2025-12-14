@@ -397,11 +397,11 @@ async def login(
 ):
     """
     Authenticate user and receive tokens.
-    
+
     Returns:
-    - access_token: Short-lived JWT (15 minutes)
-    - refresh_token: Long-lived JWT for token refresh (7 days)
-    
+    - access_token: Short-lived JWT (1 hour)
+    - refresh_token: Long-lived JWT for token refresh (30 days)
+
     If MFA is enabled, provide the mfa_code field.
     """
     client_info = get_client_info(request)

@@ -227,8 +227,8 @@ class Settings(BaseSettings):
         description="Secret key for JWT signing. MUST be set in production!"
     )
     jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 15  # Short-lived for Zero Trust
-    refresh_token_expire_days: int = 7
+    access_token_expire_minutes: int = 60  # 1 hour - balance between security and UX
+    refresh_token_expire_days: int = 30  # 30 days - standard for developer tools
     
     log_level: LogLevel = Field(
         default=LogLevel.INFO,
