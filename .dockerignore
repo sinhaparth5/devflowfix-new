@@ -1,11 +1,70 @@
+# Version control
+.git
+.gitignore
 .github
+
+# Environment and secrets - CRITICAL
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.cert
+*.p12
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
 .pytest*
+.pytest_cache
+.coverage
+htmlcov/
+.tox/
 .venv
+venv/
+ENV/
+env/
+
+# Development and testing
+tests/
 benchmarks
-config
-docs
 examples
-monitoring
 notebooks
 scripts
-.env.example
+config
+
+# Documentation
+docs
+*.md
+!README.md
+
+# Logs and databases
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+build/
+dist/
+*.egg-info
+.eggs/
+
+# Monitoring and misc
+monitoring
+uv.lock
+Makefile

@@ -20,6 +20,11 @@ class ErrorBlock:
     severity: str = "medium"
     
     def get_hash(self) -> str:
+        """Generate a short hash for error deduplication.
+
+        Using MD5 is safe here - this is for deduplication only, not security.
+        No cryptographic properties are required for grouping similar errors.
+        """
         content = f"{self.error_type}:{self.error_message}:{self.file_path or ''}"
         return hashlib.md5(content.encode()).hexdigest()[:8]
 
@@ -32,20 +37,24 @@ class ErrorGroup:
     count: int = 0
 
 class GitHubLogParser:
+    # Regex patterns use bounded quantifiers to prevent ReDoS attacks
+    # [^\n]+ matches any char except newline, preventing catastrophic backtracking
     ERROR_PATTERNS = [
-        (r'##\[error\](.+)', 'github_error', 'high'),
+        (r'##\[error\]([^\n]+)', 'github_error', 'high'),
         (r'Error: Process completed with exit code (\d+)', 'exit_code', 'high'),
-        (r'(\d+:\d+)\s+error\s+(.+?)\s+(@[\w/-]+)', 'lint_error', 'medium'),
-        (r'(?i)fatal[:\s](.+)', 'fatal', 'critical'),
+        # Lint error: more specific pattern with bounded quantifiers
+        (r'(\d{1,6}:\d{1,6})\s+error\s+([^\n]{1,500}?)\s+(@[\w/-]{1,100})', 'lint_error', 'medium'),
+        (r'(?i)fatal[:\s]([^\n]+)', 'fatal', 'critical'),
         (r'(?i)panic:', 'panic', 'critical'),
         (r'(?i)traceback \(most recent call last\)', 'python_exception', 'high'),
-        (r'FAIL[:\s](.+)', 'test_failure', 'medium'),
-        (r'npm ERR!(.+)', 'npm_error', 'medium'),
-        (r'Error:\s*(.+)', 'error', 'medium'),
+        (r'FAIL[:\s]([^\n]+)', 'test_failure', 'medium'),
+        (r'npm ERR!([^\n]+)', 'npm_error', 'medium'),
+        (r'Error:\s*([^\n]+)', 'error', 'medium'),
     ]
-    
+
     FILE_PATH_PATTERN = r'([/\w.-]+\.(tsx?|jsx?|py|go|java|rb|php|cs|cpp|c|h))'
     ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    MAX_LINE_LENGTH = 10000  # Prevent processing of extremely long lines
     
     def __init__(self, max_errors_per_type: int = 5, max_total_length: int = 2000):
         self.max_errors_per_type = max_errors_per_type
@@ -56,6 +65,11 @@ class GitHubLogParser:
         ]
     
     def clean_line(self, line: str) -> str:
+        """Clean and validate log line to prevent ReDoS attacks."""
+        # Truncate extremely long lines to prevent ReDoS
+        if len(line) > self.MAX_LINE_LENGTH:
+            line = line[:self.MAX_LINE_LENGTH]
+
         line = self.ANSI_ESCAPE.sub('', line)
         line = re.sub(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z\s+', '', line)
         return line.strip()
@@ -65,7 +79,8 @@ class GitHubLogParser:
         return match.group(1) if match else None
     
     def parse_lint_error(self, line: str, step_name: str) -> Optional[ErrorBlock]:
-        match = re.search(r'(\d+:\d+)\s+error\s+(.+?)\s+(@[\w/-]+)', line)
+        """Parse lint errors with ReDoS-safe regex patterns."""
+        match = re.search(r'(\d{1,6}:\d{1,6})\s+error\s+([^\n]{1,500}?)\s+(@[\w/-]{1,100})', line)
         if match:
             location, message, rule = match.groups()
             file_path = self.extract_file_path(line)
@@ -92,16 +107,17 @@ class GitHubLogParser:
             if not cleaned:
                 continue
             
-            step_match = re.search(r'##\[group\](.+)', line)
+            step_match = re.search(r'##\[group\]([^\n]+)', line)
             if step_match:
                 current_step = step_match.group(1).strip()
                 continue
-            
+
             file_path = self.extract_file_path(cleaned)
             if file_path and not re.search(r'\d+:\d+\s+error', cleaned):
                 current_file = file_path
-            
-            lint_match = re.search(r'(\d+:\d+)\s+error\s+(.+?)\s+(@[\w/-]+)', cleaned)
+
+            # Use bounded quantifiers to prevent ReDoS
+            lint_match = re.search(r'(\d{1,6}:\d{1,6})\s+error\s+([^\n]{1,500}?)\s+(@[\w/-]{1,100})', cleaned)
             if lint_match and current_file:
                 location, message, rule = lint_match.groups()
                 
