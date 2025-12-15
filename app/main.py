@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from fastapi import FastAPI, Request, status, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import ORJSONResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
@@ -23,6 +23,8 @@ from app.middleware import (
     ErrorHandlingMiddleware,
     RateLimitMiddleware,
     PerformanceMonitoringMiddleware,
+    SecurityHeadersMiddleware,
+    BrotliOrGzipMiddleware,
 )
 from app.dependencies import get_engine, get_db, get_event_processor
 
@@ -77,7 +79,14 @@ app = FastAPI(
     redoc_url="/redoc" if not settings.is_production else None,
     openapi_url="/openapi.json" if not settings.is_production else None,
     lifespan=lifespan,
-    default_response_class=ORJSONResponse,
+    default_response_class=ORJSONResponse,  # ORJSON is 2-3x faster than stdlib json
+    swagger_ui_parameters={
+        "persistAuthorization": True,
+        "displayRequestDuration": True,
+        "filter": True,
+        "tryItOutEnabled": True,
+    },
+    generate_unique_id_function=lambda route: f"{route.tags[0]}-{route.name}" if route.tags else route.name,
 )
 
 
@@ -109,27 +118,21 @@ def custom_openapi():
 
 app.openapi = custom_openapi
 
-app.add_middleware(RequestIDMiddleware)
+# Middleware order matters! Applied in reverse order (last added = first executed)
+# Order: Error Handling -> Rate Limiting -> Logging -> Compression -> CORS -> Security -> Performance -> Request ID
 
-app.add_middleware(
-    PerformanceMonitoringMiddleware,
-    slow_request_threshold_ms=1000,
-)
+# 1. Error handling (catch all errors)
+app.add_middleware(ErrorHandlingMiddleware)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["X-Request-ID", "X-Response-Time"],
-)
+# 2. Rate limiting (block bad actors early)
+if settings.is_production:
+    app.add_middleware(
+        RateLimitMiddleware,
+        requests_per_minute=120,  # Increased for better throughput
+        exclude_paths=["/health", "/ready"],
+    )
 
-app.add_middleware(
-    GZipMiddleware,
-    minimum_size=1000,
-)
-
+# 3. Request logging (log after rate limiting)
 app.add_middleware(
     RequestLoggingMiddleware,
     log_request_body=settings.log_level == "DEBUG",
@@ -137,14 +140,43 @@ app.add_middleware(
     exclude_paths=["/health", "/ready"],
 )
 
-if settings.is_production:
+# 4. Brotli/Gzip compression (compress responses with best algorithm)
+# Brotli is 15-25% better than gzip, falls back to gzip for older clients
+app.add_middleware(
+    BrotliOrGzipMiddleware,
+    minimum_size=500,  # Compress responses > 500 bytes
+    quality=4,  # Brotli quality 0-11 (4=balanced, 11=max compression)
+)
+
+# 5. CORS (handle cross-origin requests)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins_list,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["X-Request-ID", "X-Response-Time"],
+    max_age=3600,  # Cache preflight requests for 1 hour
+)
+
+# 6. Trusted host (prevent host header attacks)
+if settings.is_production and settings.allowed_hosts:
     app.add_middleware(
-        RateLimitMiddleware,
-        requests_per_minute=60,
-        exclude_paths=["/health", "/ready"],
+        TrustedHostMiddleware,
+        allowed_hosts=settings.allowed_hosts.split(",") if isinstance(settings.allowed_hosts, str) else settings.allowed_hosts,
     )
 
-app.add_middleware(ErrorHandlingMiddleware)
+# 7. Security headers (add security headers to responses)
+app.add_middleware(SecurityHeadersMiddleware)
+
+# 8. Performance monitoring (track request timing)
+app.add_middleware(
+    PerformanceMonitoringMiddleware,
+    slow_request_threshold_ms=2000,  # Increased threshold for complex operations
+)
+
+# 9. Request ID (first middleware, adds ID to all requests)
+app.add_middleware(RequestIDMiddleware)
 
 
 @app.exception_handler(RequestValidationError)
@@ -210,7 +242,7 @@ async def devflowfix_exception_handler(request: Request, exc: DevFlowFixExceptio
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     request_id = getattr(request.state, "request_id", "unknown")
-    
+
     logger.error(
         "unhandled_exception",
         request_id=request_id,
@@ -218,14 +250,14 @@ async def general_exception_handler(request: Request, exc: Exception):
         error=str(exc),
         exc_info=True,
     )
-    
-    detail = str(exc) if not settings.is_production else "Internal server error"
-    
+
+    # Never expose internal error details to external users
+    # Error details are logged above for debugging purposes
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "error": "internal_error",
-            "message": detail,
+            "message": "An internal server error occurred. Please contact support with the request ID.",
             "request_id": request_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },

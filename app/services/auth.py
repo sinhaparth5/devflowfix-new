@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 from uuid import uuid4
 import secrets
-import hashlib
 import base64
 
 import bcrypt
@@ -156,8 +155,20 @@ class AuthService:
         return token, token_hash
 
     def _hash_token(self, token: str) -> str:
-        """Hash a token for secure storage."""
-        return hashlib.sha256(token.encode()).hexdigest()
+        """Hash a token for secure storage using bcrypt."""
+        # bcrypt requires bytes input, and generates a salted hash
+        token_bytes = token.encode('utf-8')[:72]  # bcrypt has a 72-byte limit
+        salt = bcrypt.gensalt(rounds=12)
+        return bcrypt.hashpw(token_bytes, salt).decode('utf-8')
+
+    def _verify_token_hash(self, token: str, stored_hash: str) -> bool:
+        """Verify a token against its stored bcrypt hash."""
+        try:
+            token_bytes = token.encode('utf-8')[:72]
+            hash_bytes = stored_hash.encode('utf-8')
+            return bcrypt.checkpw(token_bytes, hash_bytes)
+        except Exception:
+            return False
 
     def verify_access_token(self, token: str) -> AccessTokenClaims:
         """Verify and decode an access token."""
@@ -235,8 +246,7 @@ class AuthService:
                     raise AuthenticationError("Session expired or revoked", "session_invalid")
 
                 # Verify token hash matches
-                token_hash = self._hash_token(token)
-                if session.refresh_token_hash != token_hash:
+                if not self._verify_token_hash(token, session.refresh_token_hash):
                     # Possible token reuse attack - revoke all sessions
                     logger.warning(
                         "refresh_token_reuse_detected",
@@ -640,7 +650,6 @@ class AuthService:
 
     def verify_api_key(self, api_key: str) -> UserTable:
         """Verify an API key and return the user."""
-        key_hash = self._hash_token(api_key)
         prefix = api_key[:10]
 
         # Find user with matching prefix (for efficiency)
@@ -649,7 +658,7 @@ class AuthService:
         ).all()
 
         for user in users:
-            if user.api_key_hash == key_hash:
+            if self._verify_token_hash(api_key, user.api_key_hash):
                 if not user.is_active:
                     raise AuthenticationError("User account is disabled", "account_disabled")
                 return user

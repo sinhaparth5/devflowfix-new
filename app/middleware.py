@@ -4,6 +4,8 @@
 import time
 import json
 from typing import Callable
+import brotli
+import gzip as gzip_lib
 from fastapi import Request, Response, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -168,7 +170,7 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
         except Exception as exc:
             # Handle unexpected exceptions
             request_id = getattr(request.state, "request_id", "unknown")
-            
+
             logger.error(
                 "unhandled_exception",
                 request_id=request_id,
@@ -176,15 +178,14 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
                 error=str(exc),
                 exc_info=True,
             )
-            
-            # Don't expose internal errors in production
-            detail = str(exc) if settings.environment != "prod" else "Internal server error"
-            
+
+            # Never expose internal error details to external users
+            # Error details are logged above for debugging purposes
             return JSONResponse(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content={
                     "error": "internal_error",
-                    "message": detail,
+                    "message": "An internal server error occurred. Please contact support with the request ID.",
                     "request_id": request_id,
                 },
             )
@@ -468,5 +469,152 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         
         # Add request ID to response headers
         response.headers["X-Request-ID"] = request_id
-        
+
         return response
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware for adding security headers to all responses.
+
+    Implements defense-in-depth security headers including:
+    - X-Content-Type-Options: Prevent MIME sniffing
+    - X-Frame-Options: Prevent clickjacking
+    - Strict-Transport-Security: Force HTTPS
+    - Referrer-Policy: Control referrer information
+    - Permissions-Policy: Restrict browser features
+    """
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        """
+        Process request and add security headers.
+
+        Args:
+            request: Incoming request
+            call_next: Next middleware/handler
+
+        Returns:
+            Response with security headers
+        """
+        response = await call_next(request)
+
+        # Security headers for defense in depth
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+
+        # Cache control for API responses (prevent caching of dynamic content)
+        if request.url.path not in ["/health", "/ready"]:
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, proxy-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+
+        return response
+
+
+class BrotliOrGzipMiddleware(BaseHTTPMiddleware):
+    """
+    Smart compression middleware with Brotli (preferred) and Gzip fallback.
+
+    Brotli provides 15-25% better compression than gzip with similar speed.
+    Automatically falls back to gzip for older clients that don't support Brotli.
+
+    Performance characteristics:
+    - Brotli quality 4: Balanced speed/compression (recommended)
+    - Gzip level 6: Balanced speed/compression (fallback)
+    - Minimum size: 500 bytes (skip compression for tiny responses)
+
+    Browser support:
+    - Brotli: Chrome 50+, Firefox 44+, Safari 11+, Edge 15+ (97%+ coverage)
+    - Gzip: All browsers (100% coverage)
+    """
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        minimum_size: int = 500,
+        quality: int = 4,
+    ):
+        """
+        Initialize compression middleware.
+
+        Args:
+            app: ASGI application
+            minimum_size: Minimum response size to compress (bytes)
+            quality: Brotli compression quality 0-11 (4=balanced, 11=max)
+        """
+        super().__init__(app)
+        self.minimum_size = minimum_size
+        self.brotli_quality = quality  # 0-11, 4 is balanced (11=max compression)
+        self.gzip_level = 6  # 1-9, 6 is balanced
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        """
+        Process request and compress response if appropriate.
+
+        Args:
+            request: Incoming request
+            call_next: Next middleware/handler
+
+        Returns:
+            Response (compressed or uncompressed)
+        """
+        response = await call_next(request)
+
+        # Don't compress if already compressed or too small
+        if (
+            "content-encoding" in response.headers
+            or "content-length" not in response.headers
+            or int(response.headers.get("content-length", 0)) < self.minimum_size
+        ):
+            return response
+
+        # Parse Accept-Encoding header
+        accept_encoding = request.headers.get("accept-encoding", "").lower()
+
+        # Get response body
+        body = b""
+        async for chunk in response.body_iterator:
+            body += chunk
+
+        # Skip if body is too small
+        if len(body) < self.minimum_size:
+            return Response(
+                content=body,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                media_type=response.media_type,
+            )
+
+        # Try Brotli first (best compression)
+        if "br" in accept_encoding:
+            compressed_body = brotli.compress(body, quality=self.brotli_quality)
+            encoding = "br"
+        # Fallback to gzip
+        elif "gzip" in accept_encoding:
+            compressed_body = gzip_lib.compress(body, compresslevel=self.gzip_level)
+            encoding = "gzip"
+        else:
+            # No compression supported by client
+            return Response(
+                content=body,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                media_type=response.media_type,
+            )
+
+        # Build new response with compressed body
+        headers = dict(response.headers)
+        headers["content-encoding"] = encoding
+        headers["content-length"] = str(len(compressed_body))
+        headers["vary"] = "Accept-Encoding"
+
+        return Response(
+            content=compressed_body,
+            status_code=response.status_code,
+            headers=headers,
+            media_type=response.media_type,
+        )
