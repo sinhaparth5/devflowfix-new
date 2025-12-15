@@ -4,18 +4,14 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
-import asyncio
-import brotli
-import gzip as gzip_lib
 from fastapi import FastAPI, Request, status, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import ORJSONResponse, JSONResponse, Response
+from fastapi.responses import ORJSONResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from starlette.middleware.base import BaseHTTPMiddleware
 import structlog
 
 from app.core.config import settings
@@ -27,6 +23,8 @@ from app.middleware import (
     ErrorHandlingMiddleware,
     RateLimitMiddleware,
     PerformanceMonitoringMiddleware,
+    SecurityHeadersMiddleware,
+    BrotliOrGzipMiddleware,
 )
 from app.dependencies import get_engine, get_db, get_event_processor
 
@@ -49,98 +47,6 @@ structlog.configure(
 )
 
 logger = structlog.get_logger()
-
-
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Add security headers to all responses."""
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        # Security headers for defense in depth
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
-        # Cache control for API responses
-        if request.url.path not in ["/health", "/ready"]:
-            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, proxy-revalidate"
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Expires"] = "0"
-        return response
-
-
-class BrotliOrGzipMiddleware(BaseHTTPMiddleware):
-    """
-    Smart compression middleware with Brotli (preferred) and Gzip fallback.
-
-    Brotli provides 15-25% better compression than gzip with similar speed.
-    Falls back to gzip for older clients.
-    """
-
-    def __init__(self, app, minimum_size: int = 500, quality: int = 4):
-        super().__init__(app)
-        self.minimum_size = minimum_size
-        self.brotli_quality = quality  # 0-11, 4 is balanced (11=max compression)
-        self.gzip_level = 6  # 1-9, 6 is balanced
-
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-
-        # Don't compress if already compressed or too small
-        if (
-            "content-encoding" in response.headers
-            or "content-length" not in response.headers
-            or int(response.headers.get("content-length", 0)) < self.minimum_size
-        ):
-            return response
-
-        # Parse Accept-Encoding header
-        accept_encoding = request.headers.get("accept-encoding", "").lower()
-
-        # Get response body
-        body = b""
-        async for chunk in response.body_iterator:
-            body += chunk
-
-        # Skip if body is too small
-        if len(body) < self.minimum_size:
-            return Response(
-                content=body,
-                status_code=response.status_code,
-                headers=dict(response.headers),
-                media_type=response.media_type,
-            )
-
-        # Try Brotli first (best compression)
-        if "br" in accept_encoding:
-            compressed_body = brotli.compress(body, quality=self.brotli_quality)
-            encoding = "br"
-        # Fallback to gzip
-        elif "gzip" in accept_encoding:
-            compressed_body = gzip_lib.compress(body, compresslevel=self.gzip_level)
-            encoding = "gzip"
-        else:
-            # No compression supported by client
-            return Response(
-                content=body,
-                status_code=response.status_code,
-                headers=dict(response.headers),
-                media_type=response.media_type,
-            )
-
-        # Build new response with compressed body
-        headers = dict(response.headers)
-        headers["content-encoding"] = encoding
-        headers["content-length"] = str(len(compressed_body))
-        headers["vary"] = "Accept-Encoding"
-
-        return Response(
-            content=compressed_body,
-            status_code=response.status_code,
-            headers=headers,
-            media_type=response.media_type,
-        )
 
 
 @asynccontextmanager
