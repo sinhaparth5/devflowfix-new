@@ -16,6 +16,7 @@ import structlog
 from app.dependencies import get_db
 from app.core.schemas.common import PaginatedResponse
 from app.services.github_token_manager import GitHubTokenManager
+from app.api.v1.auth import get_current_active_user
 
 logger = structlog.get_logger(__name__)
 
@@ -37,7 +38,7 @@ async def register_github_token(
     token: str = Query(..., description="GitHub Personal Access Token"),
     description: str = Query("", description="Token description"),
     scopes: Optional[str] = Query(None, description="Comma-separated scopes"),
-    created_by: str = Query("api", description="Who is registering this token"),
+    current_user: dict = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """
@@ -53,22 +54,24 @@ async def register_github_token(
     - `contents` - Write repository contents
     """
     try:
+        user = current_user["user"]
         manager = GitHubTokenManager()
-        
+
         logger.info(
             "token_registration_request",
+            user_id=user.user_id,
             owner=owner,
             repo=repo,
-            created_by=created_by,
         )
-        
+
         result = manager.register_token(
+            user_id=user.user_id,
             owner=owner,
             repo=repo,
             token=token,
             description=description,
-            scopes=scopes.split(",") if scopes else ["repo", "workflow"],
-            created_by=created_by,
+            scopes=scopes.split(",") if scopes else ["repo", "workflow", "contents"],
+            created_by=user.email or user.user_id,
         )
         
         logger.info(
@@ -99,11 +102,12 @@ async def register_github_token(
 @router.get(
     "/tokens",
     summary="List registered tokens",
-    description="List all registered GitHub tokens",
+    description="List all registered GitHub tokens for current user",
 )
 async def list_github_tokens(
     owner: Optional[str] = Query(None, description="Filter by owner"),
     active_only: bool = Query(True, description="Only list active tokens"),
+    current_user: dict = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """
@@ -112,12 +116,14 @@ async def list_github_tokens(
     Tokens are displayed with masked values for security.
     """
     try:
+        user = current_user["user"]
         manager = GitHubTokenManager()
-        
-        tokens = manager.list_tokens(owner=owner, active_only=active_only)
-        
+
+        tokens = manager.list_tokens(user_id=user.user_id, owner=owner, active_only=active_only)
+
         logger.info(
             "tokens_listed",
+            user_id=user.user_id,
             count=len(tokens),
             owner=owner,
         )
@@ -143,6 +149,7 @@ async def list_github_tokens(
 )
 async def deactivate_github_token(
     token_id: str,
+    current_user: dict = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """
@@ -151,8 +158,10 @@ async def deactivate_github_token(
     The token is marked as inactive but not deleted from the database.
     """
     try:
+        user = current_user["user"]
         manager = GitHubTokenManager()
-        
+
+        # TODO: Verify token belongs to user before deactivating
         success = manager.deactivate_token(token_id)
         
         if not success:

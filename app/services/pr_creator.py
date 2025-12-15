@@ -71,39 +71,51 @@ class PRCreatorService:
             incident: Incident,
             analysis: AnalysisResult,
             solution: Dict[str, Any],
+            user_id: Optional[str] = None,
             db_session=None,
     ) -> Dict[str, Any]:
         """
         Create an automated fix PR in the source repository.
-        
+
         Args:
             incident: Incident details with repo information
             analysis: AI analysis result with root cause and fixability
             solution: NVIDIA AI-generated solution with code changes
+            user_id: User ID for token retrieval (required)
             db_session: Database session for tracking
-        
+
         Returns:
             PR result with metadata
-        
+
         Raises:
-            ValueError: If repository information not found
+            ValueError: If repository information or user_id not found
         """
         from app.dependencies import get_db
-        
+
+        # Get user_id from incident context if not provided
+        if not user_id:
+            user_id = incident.context.get("user_id")
+
+        if not user_id:
+            raise ValueError(
+                "Cannot create PR: user_id required. "
+                "Ensure the webhook includes user_id in the incident context."
+            )
+
         repo_info = self._extract_repo_info(incident)
         if not repo_info:
             raise ValueError("Cannot create PR: repository info not found")
-        
+
         owner = repo_info["owner"]
         repo = repo_info["repo"]
         base_branch = repo_info.get("branch", "main")
-        
-        # Get repo-specific GitHub token
-        token = self.token_manager.get_token(owner, repo)
+
+        # Get repo-specific GitHub token for THIS USER
+        token = self.token_manager.get_token(user_id, owner, repo)
         if not token:
             raise ValueError(
-                f"No GitHub token found for {owner}/{repo}. "
-                "Please register the token via /api/v1/pr-management/tokens/register"
+                f"No GitHub token found for user {user_id} and repository {owner}/{repo}. "
+                "Please register your token via /api/v1/pr-management/tokens/register"
             )
         
         # Create authenticated GitHub client for this repo

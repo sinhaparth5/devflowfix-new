@@ -472,20 +472,25 @@ class PullRequestTable(SQLModel, table=True):
 class GitHubTokenTable(SQLModel, table=True):
     """
     Stores GitHub access tokens for external repositories.
-    
+
     Allows DevFlowFix to create PRs in different repos using their own tokens.
     Supports both:
     - Repository-specific tokens (more secure)
     - Organization-level tokens (simpler but broader)
+
+    Each user has their own set of tokens for security.
     """
     __tablename__ = "github_tokens"
 
     id: str = Field(primary_key=True, max_length=36)
-    
+
+    # User association - CRITICAL for security
+    user_id: str = Field(foreign_key="users.user_id", index=True, max_length=50)
+
     # Repository identification
     repository_owner: str = Field(index=True, max_length=255)
     repository_name: Optional[str] = Field(default=None, index=True, max_length=255)  # NULL = org-level token
-    repository_full: str = Field(unique=True, index=True, max_length=512)  # "owner/repo" or "owner/*"
+    repository_full: str = Field(index=True, max_length=512)  # "owner/repo" or "owner/*" - not unique anymore
     
     # Token details
     token: str = Field(max_length=1024)  # Encrypted token value
