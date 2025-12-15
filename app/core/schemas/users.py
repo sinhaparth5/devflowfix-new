@@ -16,7 +16,9 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     """Schema for creating a new user (registration)."""
     password: str = Field(..., min_length=8, max_length=128, description="Password")
-    
+    avatar_data: Optional[str] = Field(None, description="Base64 encoded avatar image data")
+    avatar_content_type: Optional[str] = Field(default="image/png", description="MIME type of avatar image")
+
     @field_validator('password')
     @classmethod
     def validate_password(cls, v):
@@ -33,14 +35,41 @@ class UserCreate(UserBase):
             raise ValueError('Password must contain at least one special character')
         return v
 
+    @field_validator('avatar_content_type')
+    @classmethod
+    def validate_avatar_content_type(cls, v):
+        """Validate avatar content type."""
+        if v is None:
+            return v
+        allowed_types = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"]
+        if v.lower() not in allowed_types:
+            raise ValueError(f'Avatar content type must be one of: {", ".join(allowed_types)}')
+        return v.lower()
+
 
 class UserUpdate(BaseModel):
     """Schema for updating a user."""
     full_name: Optional[str] = Field(None, max_length=255)
     avatar_url: Optional[str] = Field(None, max_length=500)
+    avatar_data: Optional[str] = Field(None, description="Base64 encoded avatar image data")
+    avatar_content_type: Optional[str] = Field(default="image/png", description="MIME type of avatar image")
+    github_username: Optional[str] = Field(None, max_length=50, description="GitHub username")
+    organization_id: Optional[str] = Field(None, max_length=50, description="Organization ID")
+    team_id: Optional[str] = Field(None, max_length=50, description="Team ID")
     preferences: Optional[dict] = None
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator('avatar_content_type')
+    @classmethod
+    def validate_avatar_content_type(cls, v):
+        """Validate avatar content type."""
+        if v is None:
+            return v
+        allowed_types = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"]
+        if v.lower() not in allowed_types:
+            raise ValueError(f'Avatar content type must be one of: {", ".join(allowed_types)}')
+        return v.lower()
 
 
 class UserResponse(UserBase):
@@ -48,6 +77,7 @@ class UserResponse(UserBase):
     user_id: str
     full_name: Optional[str] = None
     avatar_url: Optional[str] = None
+    github_username: Optional[str] = None
     organization_id: Optional[str] = None
     team_id: Optional[str] = None
     role: str
@@ -296,3 +326,31 @@ class AuditLogListResponse(BaseModel):
     skip: int
     limit: int
     has_more: bool
+
+
+# User Details Schemas
+
+class UserDetailsBase(BaseModel):
+    """Base user details schema with common fields."""
+    country: Optional[str] = Field(None, max_length=100, description="Country")
+    city: Optional[str] = Field(None, max_length=100, description="City")
+    postal_code: Optional[str] = Field(None, max_length=20, description="Postal code")
+    facebook_link: Optional[str] = Field(None, max_length=500, description="Facebook profile link")
+    twitter_link: Optional[str] = Field(None, max_length=500, description="Twitter profile link")
+    linkedin_link: Optional[str] = Field(None, max_length=500, description="LinkedIn profile link")
+    instagram_link: Optional[str] = Field(None, max_length=500, description="Instagram profile link")
+    github_link: Optional[str] = Field(None, max_length=500, description="GitHub profile link")
+
+
+class UserDetailsUpdate(UserDetailsBase):
+    """Schema for updating user details."""
+    model_config = ConfigDict(extra="forbid")
+
+
+class UserDetailsResponse(UserDetailsBase):
+    """Schema for user details in API responses."""
+    user_id: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

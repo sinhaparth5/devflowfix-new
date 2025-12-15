@@ -6,6 +6,18 @@ from typing import Optional
 from sqlmodel import SQLModel, Field, Column, JSON, Relationship
 from sqlalchemy import Text, Index, desc, ForeignKey
 from pgvector.sqlalchemy import Vector
+import enum
+
+class PRStatus(str, enum.Enum):
+    """Status of an automated PR."""
+    CREATED = "created"
+    OPEN = "open"
+    DRAFT = "draft"
+    REVIEW_REQUESTED = "review_requested"
+    APPROVED = "approved"
+    MERGED = "merged"
+    CLOSED = "closed"
+    FAILED = "failed"
 
 class UserTable(SQLModel, table=True):
     """
@@ -387,26 +399,6 @@ class ConfigTable(SQLModel, table=True):
     is_secret: bool = Field(default=False)  # Should be encrypted
     is_system: bool = Field(default=False)  # System config, not user-editable
 
-
-# ============================================================================
-# PR Management Models
-# ============================================================================
-
-import enum
-
-
-class PRStatus(str, enum.Enum):
-    """Status of an automated PR."""
-    CREATED = "created"
-    OPEN = "open"
-    DRAFT = "draft"
-    REVIEW_REQUESTED = "review_requested"
-    APPROVED = "approved"
-    MERGED = "merged"
-    CLOSED = "closed"
-    FAILED = "failed"
-
-
 class PullRequestTable(SQLModel, table=True):
     """
     Stores metadata for automatically created pull requests.
@@ -580,3 +572,39 @@ class PRCreationLogTable(SQLModel, table=True):
             f"repo={self.repository_full}"
             f")>"
         )
+
+class UserDetailsTable(SQLModel, table=True):
+    """
+    User details table.
+
+    Stores additional user profile information and social links.
+    """
+
+    __tablename__ = "user_details"
+
+    # Primary Key
+    user_id: str = Field(
+        foreign_key="users.user_id",
+        primary_key=True,
+        max_length=50
+    )
+
+    # Location Information
+    country: Optional[str] = Field(default=None, max_length=100)
+    city: Optional[str] = Field(default=None, max_length=100)
+    postal_code: Optional[str] = Field(default=None, max_length=20)
+
+    # Social Media Links
+    facebook_link: Optional[str] = Field(default=None, max_length=500)
+    twitter_link: Optional[str] = Field(default=None, max_length=500)
+    linkedin_link: Optional[str] = Field(default=None, max_length=500)
+    instagram_link: Optional[str] = Field(default=None, max_length=500)
+    github_link: Optional[str] = Field(default=None, max_length=500)
+
+    # Timestamps
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_user_details_country_city', 'country', 'city'),
+    )

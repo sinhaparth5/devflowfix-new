@@ -40,13 +40,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean
 
 COPY --from=builder /install /install
-
 COPY --from=builder /build/app ./app
-COPY . .
 
+# Copy only necessary runtime files (sensitive files excluded via .dockerignore)
+# Note: alembic.ini is included for database migrations if needed
+COPY alembic.ini* ./
+
+# Create non-root user and set secure permissions
 RUN groupadd -r appuser && \
     useradd -r -g appuser -u 1000 -m appuser && \
-    chown -R appuser:appuser /app
+    chown -R appuser:appuser /app && \
+    # Remove write permissions from all application files
+    chmod -R a-w /app /install && \
+    find /app -type d -exec chmod 555 {} \; && \
+    find /app -type f -exec chmod 444 {} \; && \
+    find /install -type d -exec chmod 555 {} \; && \
+    find /install -type f -exec chmod 444 {} \;
 
 USER appuser
 

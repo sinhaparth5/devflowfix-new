@@ -29,13 +29,13 @@ WORKDIR /app
 
 USER nonroot
 
-# Copy runtime libraries from builder
+# Copy runtime libraries from builder (read-only)
 COPY --from=builder /usr/lib/libpq.so* /usr/lib/
 COPY --from=builder /usr/lib/postgresql* /usr/lib/
 
-# Copy installed packages and compiled app
-COPY --from=builder --chown=nonroot:nonroot /home/nonroot/.local /home/nonroot/.local
-COPY --from=builder --chown=nonroot:nonroot /build/app ./app
+# Copy installed packages and compiled app with read-only permissions
+COPY --from=builder --chown=nonroot:nonroot --chmod=555 /home/nonroot/.local /home/nonroot/.local
+COPY --from=builder --chown=nonroot:nonroot --chmod=555 /build/app ./app
 
 EXPOSE 8000
 

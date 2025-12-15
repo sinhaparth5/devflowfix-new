@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import FastAPI, Request, status, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import ORJSONResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from sqlalchemy import text
@@ -77,6 +77,7 @@ app = FastAPI(
     redoc_url="/redoc" if not settings.is_production else None,
     openapi_url="/openapi.json" if not settings.is_production else None,
     lifespan=lifespan,
+    default_response_class=ORJSONResponse,
 )
 
 
@@ -310,6 +311,7 @@ async def root():
             "webhooks": "/api/v1/webhook",
             "analytics": "/api/v1/analytics",
             "incidents": "/api/v1/incidents",
+            "user_details": "/api/v1/user-details",
         },
     }
 
@@ -319,6 +321,7 @@ from app.api.v1.analytics import router as analytics_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.incidents import router as incidents_router
 from app.api.v1.pr_management import router as pr_management_router
+from app.api.v1.user_details import router as user_details_router
 
 app.include_router(
     auth_router,
@@ -346,7 +349,14 @@ app.include_router(
 
 app.include_router(
     pr_management_router,
+    prefix="/api/v1",
     tags=["PR Management"],
+)
+
+app.include_router(
+    user_details_router,
+    prefix="/api/v1",
+    tags=["User Details"],
 )
 
 logger.info(
@@ -357,6 +367,7 @@ logger.info(
         "/api/v1/webhook",
         "/api/v1/analytics",
         "/api/v1/pr-management",
+        "/api/v1/user-details",
     ],
     webhook_endpoints=[
         "/api/v1/webhook/github/{user_id}",

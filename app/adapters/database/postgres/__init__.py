@@ -11,6 +11,7 @@ from .models import (
     GitHubTokenTable,
     PRCreationLogTable,
     PRStatus,
+    UserDetailsTable
 )
 
 from .connection import (
@@ -34,6 +35,7 @@ __all__ = [
     "UserSessionTable",
     "UserTable",
     "AuditLogTable",
+    "UserDetailsTable",
     "IncidentTable",
     "FeedbackTable",
     "RemediationHistoryTable",

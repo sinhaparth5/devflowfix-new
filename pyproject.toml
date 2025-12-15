@@ -37,4 +37,6 @@ dependencies = [
     "tenacity>=9.1.2",
     "uvicorn[standard]>=0.38.0",
     "bcrypt>=5.0.0",
+    "gunicorn>=23.0.0",
+    "orjson>=3.11.5",
 ]

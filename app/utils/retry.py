@@ -8,6 +8,7 @@ Provides decorators and utilities for retrying failed operations.
 """
 
 import asyncio
+import random
 import time
 from typing import Callable, Any, Optional, Type, Tuple
 from functools import wraps
@@ -43,11 +44,12 @@ def calculate_backoff(
         delay = base_delay * (attempt + 1)
     
     delay = min(delay, max_delay)
-    
+
     if jitter:
-        import random
+        # Add jitter to prevent thundering herd (0.5x to 1.0x of delay)
+        # Using random (not secrets) is safe here - this is for load distribution, not security
         delay = delay * (0.5 + random.random() * 0.5)
-    
+
     return delay
 
 

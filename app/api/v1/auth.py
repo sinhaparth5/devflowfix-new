@@ -3,10 +3,11 @@
 
 from datetime import datetime, timezone
 from typing import Optional, Annotated
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Header, File, UploadFile, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 import structlog
+import base64
 
 from app.dependencies import get_db
 from app.adapters.database.postgres.repositories.users import (
@@ -15,9 +16,11 @@ from app.adapters.database.postgres.repositories.users import (
     AuditLogRepository,
 )
 from app.services.auth import AuthService, AuthenticationError
+from app.services.storage import get_storage_service
 from app.core.config import settings
 from app.core.schemas.users import (
     UserCreate,
+    UserUpdate,
     UserResponse,
     UserDetailResponse,
     LoginRequest,
@@ -180,34 +183,194 @@ async def register(
 ):
     """
     Register a new user account.
-    
+
     Password requirements:
     - At least 8 characters
     - At least one uppercase letter
     - At least one lowercase letter
     - At least one digit
     - At least one special character
+
+    Avatar upload:
+    - Provide avatar_data as base64 encoded image data
+    - Supported formats: PNG, JPEG, GIF, WebP
+    - Image will be uploaded to Backblaze B2 bucket
     """
     client_info = get_client_info(request)
-    
+
     try:
+        # First create the user
         user = auth_service.register_user(
             user_data,
             ip_address=client_info["ip_address"],
             user_agent=client_info["user_agent"],
         )
-        
+
+        # Handle avatar upload if provided
+        if user_data.avatar_data:
+            try:
+                # Decode base64 avatar data
+                avatar_bytes = base64.b64decode(user_data.avatar_data)
+
+                # Upload to Backblaze
+                storage_service = get_storage_service()
+                avatar_url = storage_service.upload_avatar(
+                    file_content=avatar_bytes,
+                    user_id=user.user_id,
+                    content_type=user_data.avatar_content_type or "image/png"
+                )
+
+                # Update user with avatar URL
+                user.avatar_url = avatar_url
+                auth_service.user_repo.db.commit()
+                auth_service.user_repo.db.refresh(user)
+
+                logger.info(
+                    "user_avatar_uploaded",
+                    user_id=user.user_id,
+                    avatar_url=avatar_url,
+                )
+            except Exception as avatar_error:
+                # Log the error but don't fail registration
+                logger.warning(
+                    "avatar_upload_failed_during_registration",
+                    user_id=user.user_id,
+                    error=str(avatar_error),
+                )
+
         logger.info(
             "user_registered",
             user_id=user.user_id,
             email=user.email,
         )
-        
+
         return UserResponse.model_validate(user)
     except AuthenticationError as e:
         logger.info(
             "registration_failed",
             email=user_data.email,
+            error=e.message,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=e.message,
+        )
+
+
+@router.post(
+    "/register/with-avatar",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Register a new user with avatar file upload",
+    responses={
+        400: {"model": ErrorResponse, "description": "Email already exists or validation error"},
+    },
+)
+async def register_with_avatar_file(
+    email: str = Form(..., description="User email address"),
+    password: str = Form(..., description="User password"),
+    full_name: Optional[str] = Form(None, description="Full name"),
+    avatar_file: Optional[UploadFile] = File(None, description="Avatar image file"),
+    request: Request = None,
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    """
+    Register a new user account with direct avatar file upload.
+
+    Password requirements:
+    - At least 8 characters
+    - At least one uppercase letter
+    - At least one lowercase letter
+    - At least one digit
+    - At least one special character
+
+    Avatar upload:
+    - Upload an image file directly (optional)
+    - Supported formats: PNG, JPEG, GIF, WebP
+    - Max file size: 5MB
+    - Image will be uploaded to Backblaze B2 bucket
+    """
+    client_info = get_client_info(request)
+
+    try:
+        # Create UserCreate object for validation
+        user_data = UserCreate(
+            email=email,
+            password=password,
+            full_name=full_name
+        )
+
+        # First create the user
+        user = auth_service.register_user(
+            user_data,
+            ip_address=client_info["ip_address"],
+            user_agent=client_info["user_agent"],
+        )
+
+        # Handle avatar upload if provided
+        if avatar_file:
+            try:
+                # Validate content type
+                allowed_types = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"]
+                if avatar_file.content_type not in allowed_types:
+                    logger.warning(
+                        "invalid_avatar_content_type",
+                        user_id=user.user_id,
+                        content_type=avatar_file.content_type,
+                    )
+                    raise ValueError(f"Invalid file type. Allowed: {', '.join(allowed_types)}")
+
+                # Read file content
+                avatar_bytes = await avatar_file.read()
+
+                # Validate file size (5MB max)
+                max_size = 5 * 1024 * 1024  # 5MB
+                if len(avatar_bytes) > max_size:
+                    logger.warning(
+                        "avatar_file_too_large",
+                        user_id=user.user_id,
+                        size=len(avatar_bytes),
+                    )
+                    raise ValueError(f"File too large. Maximum size: {max_size / 1024 / 1024}MB")
+
+                # Upload to Backblaze
+                storage_service = get_storage_service()
+                avatar_url = storage_service.upload_avatar(
+                    file_content=avatar_bytes,
+                    user_id=user.user_id,
+                    content_type=avatar_file.content_type
+                )
+
+                # Update user with avatar URL
+                user.avatar_url = avatar_url
+                auth_service.user_repo.db.commit()
+                auth_service.user_repo.db.refresh(user)
+
+                logger.info(
+                    "user_avatar_uploaded",
+                    user_id=user.user_id,
+                    avatar_url=avatar_url,
+                    file_size=len(avatar_bytes),
+                )
+            except Exception as avatar_error:
+                # Log the error but don't fail registration
+                logger.warning(
+                    "avatar_upload_failed_during_registration",
+                    user_id=user.user_id,
+                    error=str(avatar_error),
+                )
+
+        logger.info(
+            "user_registered",
+            user_id=user.user_id,
+            email=user.email,
+        )
+
+        return UserResponse.model_validate(user)
+    except AuthenticationError as e:
+        logger.info(
+            "registration_failed",
+            email=email,
             error=e.message,
         )
         raise HTTPException(
@@ -234,11 +397,11 @@ async def login(
 ):
     """
     Authenticate user and receive tokens.
-    
+
     Returns:
-    - access_token: Short-lived JWT (15 minutes)
-    - refresh_token: Long-lived JWT for token refresh (7 days)
-    
+    - access_token: Short-lived JWT (1 hour)
+    - refresh_token: Long-lived JWT for token refresh (30 days)
+
     If MFA is enabled, provide the mfa_code field.
     """
     client_info = get_client_info(request)
@@ -394,6 +557,210 @@ async def get_current_user_profile(
 ):
     """Get the current authenticated user's profile."""
     return UserDetailResponse.model_validate(current_user["user"])
+
+
+@router.patch(
+    "/me",
+    response_model=UserResponse,
+    summary="Update current user profile",
+)
+async def update_current_user_profile(
+    update_data: UserUpdate,
+    current_user: dict = Depends(get_current_active_user),
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    """
+    Update the current authenticated user's profile.
+
+    Only fields provided in the request will be updated.
+    Fields that are not provided or are null will keep their existing values.
+
+    Updatable fields:
+    - full_name: User's full name
+    - avatar_data: Base64 encoded avatar image (optional)
+    - avatar_content_type: MIME type for avatar (default: image/png)
+    - github_username: GitHub username
+    - organization_id: Organization ID
+    - team_id: Team ID
+    - preferences: User preferences as a JSON object
+    """
+    try:
+        user = current_user["user"]
+        update_dict = update_data.model_dump(exclude_unset=True, exclude_none=True)
+
+        # Handle avatar upload if provided
+        if "avatar_data" in update_dict:
+            try:
+                # Decode base64 avatar data
+                avatar_bytes = base64.b64decode(update_dict["avatar_data"])
+
+                # Delete old avatar if exists
+                if user.avatar_url:
+                    try:
+                        storage_service = get_storage_service()
+                        storage_service.delete_avatar(user.avatar_url)
+                    except Exception as delete_error:
+                        logger.warning(
+                            "old_avatar_delete_failed",
+                            user_id=user.user_id,
+                            error=str(delete_error),
+                        )
+
+                # Upload new avatar to Backblaze
+                storage_service = get_storage_service()
+                avatar_url = storage_service.upload_avatar(
+                    file_content=avatar_bytes,
+                    user_id=user.user_id,
+                    content_type=update_dict.get("avatar_content_type", "image/png")
+                )
+
+                user.avatar_url = avatar_url
+
+                logger.info(
+                    "user_avatar_updated_via_profile",
+                    user_id=user.user_id,
+                    avatar_url=avatar_url,
+                )
+            except Exception as avatar_error:
+                logger.error(
+                    "avatar_upload_failed_in_profile_update",
+                    user_id=user.user_id,
+                    error=str(avatar_error),
+                    error_type=type(avatar_error).__name__,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Failed to upload avatar: {str(avatar_error)}",
+                )
+
+            # Remove avatar_data and avatar_content_type from update_dict
+            # as they're not direct model fields
+            update_dict.pop("avatar_data", None)
+            update_dict.pop("avatar_content_type", None)
+
+        # Update user fields that were provided
+        for field, value in update_dict.items():
+            if hasattr(user, field):
+                setattr(user, field, value)
+
+        # Update timestamp
+        user.updated_at = datetime.now(timezone.utc)
+
+        # Save to database
+        auth_service.user_repo.db.commit()
+        auth_service.user_repo.db.refresh(user)
+
+        logger.info(
+            "user_profile_updated",
+            user_id=user.user_id,
+            updated_fields=list(update_dict.keys()),
+        )
+
+        return UserResponse.model_validate(user)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "profile_update_failed",
+            user_id=current_user["user"].user_id,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update profile",
+        )
+
+
+@router.post(
+    "/me/avatar",
+    response_model=UserResponse,
+    summary="Update user avatar (file upload)",
+)
+async def update_user_avatar_file(
+    avatar_file: UploadFile = File(..., description="Avatar image file"),
+    current_user: dict = Depends(get_current_active_user),
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    """
+    Update the current user's avatar using direct file upload.
+
+    Upload an image file directly.
+    Supported formats: PNG, JPEG, GIF, WebP.
+    Max file size: 5MB (recommended).
+    The image will be uploaded to Backblaze B2 bucket.
+    """
+    try:
+        # Validate content type
+        allowed_types = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"]
+        if avatar_file.content_type not in allowed_types:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid file type: {avatar_file.content_type}. Allowed: {', '.join(allowed_types)}",
+            )
+
+        # Read file content
+        avatar_bytes = await avatar_file.read()
+
+        # Validate file size (5MB max)
+        max_size = 5 * 1024 * 1024  # 5MB
+        if len(avatar_bytes) > max_size:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"File too large. Maximum size: {max_size / 1024 / 1024}MB",
+            )
+
+        # Delete old avatar if exists
+        user = current_user["user"]
+        if user.avatar_url:
+            try:
+                storage_service = get_storage_service()
+                storage_service.delete_avatar(user.avatar_url)
+            except Exception as delete_error:
+                # Log but don't fail the update
+                logger.warning(
+                    "old_avatar_delete_failed",
+                    user_id=user.user_id,
+                    error=str(delete_error),
+                )
+
+        # Upload new avatar to Backblaze
+        storage_service = get_storage_service()
+        avatar_url = storage_service.upload_avatar(
+            file_content=avatar_bytes,
+            user_id=user.user_id,
+            content_type=avatar_file.content_type
+        )
+
+        # Update user with new avatar URL
+        user.avatar_url = avatar_url
+        user.updated_at = datetime.now(timezone.utc)
+        auth_service.user_repo.db.commit()
+        auth_service.user_repo.db.refresh(user)
+
+        logger.info(
+            "user_avatar_updated",
+            user_id=user.user_id,
+            avatar_url=avatar_url,
+            file_size=len(avatar_bytes),
+        )
+
+        return UserResponse.model_validate(user)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "avatar_update_failed",
+            user_id=current_user["user"].user_id,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update avatar",
+        )
 
 
 # Password Management
