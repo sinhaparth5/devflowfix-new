@@ -161,8 +161,8 @@ async def deactivate_github_token(
         user = current_user["user"]
         manager = GitHubTokenManager()
 
-        # TODO: Verify token belongs to user before deactivating
-        success = manager.deactivate_token(token_id)
+        # Verify token belongs to user before deactivating
+        success = manager.deactivate_token(token_id, user_id=user.user_id)
         
         if not success:
             raise HTTPException(

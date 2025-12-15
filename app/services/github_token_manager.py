@@ -349,35 +349,50 @@ class GitHubTokenManager:
             logger.error("token_list_failed", error=str(e))
             return []
     
-    def deactivate_token(self, token_id: str) -> bool:
+    def deactivate_token(self, token_id: str, user_id: Optional[str] = None) -> bool:
         """
         Deactivate a token (soft delete).
-        
+
         Args:
             token_id: Token record ID
-        
+            user_id: User ID for ownership verification (optional but recommended)
+
         Returns:
             True if deactivated, False otherwise
         """
         from app.dependencies import get_db
-        
+
         try:
             db = next(get_db())
-            
-            token_record = db.query(GitHubTokenTable).filter(
+
+            query = db.query(GitHubTokenTable).filter(
                 GitHubTokenTable.id == token_id
-            ).first()
-            
+            )
+
+            # Verify ownership if user_id provided
+            if user_id:
+                query = query.filter(GitHubTokenTable.user_id == user_id)
+
+            token_record = query.first()
+
             if not token_record:
-                logger.warning("token_not_found_for_deactivation", token_id=token_id)
+                logger.warning(
+                    "token_not_found_for_deactivation",
+                    token_id=token_id,
+                    user_id=user_id,
+                )
                 return False
-            
+
             token_record.is_active = False
             db.commit()
-            
-            logger.info("token_deactivated", token_id=token_id)
+
+            logger.info(
+                "token_deactivated",
+                token_id=token_id,
+                user_id=user_id,
+            )
             return True
-            
+
         except Exception as e:
             logger.error("token_deactivation_failed", token_id=token_id, error=str(e))
             return False

@@ -390,10 +390,14 @@ async def receive_github_webhook(
             queued=False,
             message=f"Event {x_github_event} acknowledged (not a failure)",
         )
-    
+
     normalized_payload = extract_github_payload(payload, x_github_event)
     normalized_payload["raw_payload"] = payload
-    normalized_payload["user_id"] = user_id
+
+    # Add user_id to context so it's available for PR creation
+    if "context" not in normalized_payload:
+        normalized_payload["context"] = {}
+    normalized_payload["context"]["user_id"] = user_id
     
     background_tasks.add_task(
         process_webhook_async,
@@ -461,10 +465,14 @@ async def receive_github_webhook_sync(
             queued=False,
             message=f"Event {x_github_event} acknowledged (not a failure)",
         )
-    
+
     normalized_payload = extract_github_payload(payload, x_github_event)
     normalized_payload["raw_payload"] = payload
-    normalized_payload["user_id"] = user_id
+
+    # Add user_id to context so it's available for PR creation
+    if "context" not in normalized_payload:
+        normalized_payload["context"] = {}
+    normalized_payload["context"]["user_id"] = user_id
     
     result = await event_processor.process(
         payload=normalized_payload,
@@ -517,7 +525,11 @@ async def receive_argocd_webhook(
     
     normalized_payload = extract_argocd_payload(payload)
     normalized_payload["raw_payload"] = payload
-    normalized_payload["user_id"] = user_id
+
+    # Add user_id to context so it's available for PR creation
+    if "context" not in normalized_payload:
+        normalized_payload["context"] = {}
+    normalized_payload["context"]["user_id"] = user_id
     
     background_tasks.add_task(
         process_webhook_async,
@@ -574,7 +586,11 @@ async def receive_kubernetes_webhook(
     
     normalized_payload = extract_kubernetes_payload(payload)
     normalized_payload["raw_payload"] = payload
-    normalized_payload["user_id"] = user_id
+
+    # Add user_id to context so it's available for PR creation
+    if "context" not in normalized_payload:
+        normalized_payload["context"] = {}
+    normalized_payload["context"]["user_id"] = user_id
     
     background_tasks.add_task(
         process_webhook_async,
@@ -638,11 +654,14 @@ async def receive_generic_webhook(
             queued=False,
             message="Webhook acknowledged (no error_log provided)",
         )
-    
+
     if not payload.get("error_log"):
         payload["error_log"] = payload.get("message", str(payload))
-    
-    payload["user_id"] = user_id
+
+    # Add user_id to context so it's available for PR creation
+    if "context" not in payload:
+        payload["context"] = {}
+    payload["context"]["user_id"] = user_id
     
     background_tasks.add_task(
         process_webhook_async,
