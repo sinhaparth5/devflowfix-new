@@ -368,18 +368,17 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         if any(request.url.path.startswith(path) for path in self.exclude_paths):
             return await call_next(request)
         
-        # Get authorization header
-        auth_header = request.headers.get("Authorization")
-        
-        # For now, just pass through
-        # TODO: Implement proper JWT verification
-        if auth_header and auth_header.startswith("Bearer "):
-            # Extract and verify token
-            # token = auth_header.split(" ")[1]
-            # user = verify_jwt_token(token)
-            # request.state.user = user
-            pass
-        
+        # NOTE: JWT verification is handled by endpoint dependencies (get_current_user),
+        # not by this middleware. This is the recommended FastAPI approach.
+        # This middleware currently just passes through all requests.
+        # If you want global auth middleware, uncomment and implement below:
+
+        # auth_header = request.headers.get("Authorization")
+        # if auth_header and auth_header.startswith("Bearer "):
+        #     token = auth_header.split(" ")[1]
+        #     user = verify_jwt_token(token)  # Implement this
+        #     request.state.user = user
+
         # Process request
         return await call_next(request)
 
