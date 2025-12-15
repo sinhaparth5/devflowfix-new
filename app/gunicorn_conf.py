@@ -1,42 +1,30 @@
-# Gunicorn configuration file for dynamic worker scaling
-# This allows environment variable control without requiring a shell
-
 import multiprocessing
 import os
 
-# Dynamic worker calculation
-# Set WEB_CONCURRENCY environment variable to override
-# 0 or empty = auto-detect (2 * CPU + 1)
-workers_env = os.getenv("WEB_CONCURRENCY", "0")
+# Explicitly low concurrency - override with WEB_CONCURRENCY env var when scaling up
+# Default to 1 worker for minimal memory usage (perfect when no users)
+workers = int(os.getenv("WEB_CONCURRENCY", "1"))
 
-try:
-    workers_count = int(workers_env)
-    if workers_count <= 0:
-        # Auto-detect: 2 * CPU + 1 (optimal for async workloads)
-        workers = multiprocessing.cpu_count() * 2 + 1
-    else:
-        workers = workers_count
-except ValueError:
-    # Fallback to auto-detect if invalid value
-    workers = multiprocessing.cpu_count() * 2 + 1
+# If someone accidentally sets 0 or negative, force to 1
+if workers < 1:
+    workers = 1
 
-# Worker class for async support
 worker_class = "uvicorn.workers.UvicornWorker"
 
-# Threading for better CPU utilization
-threads = 2
+# 1 thread is enough for async FastAPI apps
+threads = 1
 
-# Connection settings
+# No automatic worker restarting → prevents memory fragmentation from frequent restarts
+max_requests = 0
+max_requests_jitter = 0
+
+# Basic connection settings
 worker_connections = 1000
 keepalive = 5
 
 # Timeouts
 timeout = 60
 graceful_timeout = 30
-
-# Worker lifecycle management - reduced to prevent memory leaks
-max_requests = 1000
-max_requests_jitter = 100
 
 # Binding
 bind = "0.0.0.0:8000"
@@ -46,29 +34,17 @@ accesslog = "-"
 errorlog = "-"
 loglevel = os.getenv("LOG_LEVEL", "info").lower()
 
-# Performance optimizations
-# NOTE: preload_app disabled to prevent database connection pool leaks
-# Each worker loads the app independently with its own resources
-preload_app = False
+# Performance & safety
+preload_app = False        # Critical: prevents DB pool leaks
 reuse_port = True
 
-# Use shared memory for IPC (faster than disk)
-# Fallback to /tmp if /dev/shm not available
-import os
+# Use /dev/shm for temp files if available (faster, less disk I/O)
 worker_tmp_dir = "/dev/shm" if os.path.exists("/dev/shm") else None
 
-# Optional: Server hooks for monitoring
+# Helpful startup log
 def on_starting(server):
-    """Called just before the master process is initialized."""
     server.log.info(
-        f"Starting Gunicorn with {workers} workers "
-        f"({multiprocessing.cpu_count()} CPUs detected)"
+        f"Starting Gunicorn with {workers} worker(s) "
+        f"({multiprocessing.cpu_count()} CPU cores detected) - "
+        f"WEB_CONCURRENCY={os.getenv('WEB_CONCURRENCY', '1')}"
     )
-
-def on_reload(server):
-    """Called to recycle workers during a reload."""
-    server.log.info("Gracefully reloading workers")
-
-def worker_int(worker):
-    """Called when a worker receives the SIGINT or SIGQUIT signal."""
-    worker.log.info(f"Worker {worker.pid} received INT/QUIT signal")
