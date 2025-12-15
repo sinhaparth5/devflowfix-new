@@ -536,10 +536,14 @@ class EventProcessor:
                         failure_type=analysis.category.value,
                     )
 
+                    # Extract user_id from incident context
+                    user_id = incident.context.get("user_id")
+
                     pr_result = await self._create_fix_pr(
                         incident=incident,
                         analysis=analysis,
                         solution=solution,
+                        user_id=user_id,
                     )
 
                     logger.info(
@@ -692,6 +696,7 @@ class EventProcessor:
             incident: Incident,
             analysis: AnalysisResult,
             solution: Dict[str, Any],
+            user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         from app.services.pr_creator import PRCreatorService
 
@@ -702,6 +707,7 @@ class EventProcessor:
             incident=incident,
             analysis=analysis,
             solution=solution,
+            user_id=user_id,
         )
 
         return pr_result

@@ -7,6 +7,10 @@ from .models import (
     UserSessionTable,
     UserTable,
     AuditLogTable,
+    PullRequestTable,
+    GitHubTokenTable,
+    PRCreationLogTable,
+    PRStatus,
     UserDetailsTable
 )
 
@@ -37,6 +41,10 @@ __all__ = [
     "RemediationHistoryTable",
     "MetricTable",
     "ConfigTable",
+    "PullRequestTable",
+    "GitHubTokenTable",
+    "PRCreationLogTable",
+    "PRStatus",
     "DatabaseConfig",
     "DatabaseConnectionPool",
     "get_connection_pool",
