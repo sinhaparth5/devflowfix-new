@@ -1,56 +1,70 @@
 # Stage 1: Builder
-FROM cgr.dev/chainguard/python:latest-dev AS builder
+FROM python:3.13-slim-bookworm AS builder
+
 WORKDIR /build
 
-# Install build AND runtime dependencies
-USER root
-RUN apk add --no-cache \
-    build-base \
-    postgresql-dev \
-    libpq
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-USER nonroot
-COPY --chown=nonroot:nonroot requirements.txt .
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Install Python dependencies
+COPY requirements.txt .
 RUN pip install --user --no-cache-dir -r requirements.txt
 
-COPY --chown=nonroot:nonroot app ./app
+# Copy and compile application
+COPY app ./app
 RUN python -m compileall -q app/
 
 # Stage 2: Runtime - Minimal production image
-FROM cgr.dev/chainguard/python:latest
+FROM python:3.13-slim-bookworm
 
 LABEL maintainer="Parth Sinha and Shine Gupta"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH="/app:/home/nonroot/.local/lib/python3.12/site-packages"
+    PYTHONPATH="/app"
 
 WORKDIR /app
 
-USER nonroot
+# Install only runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy runtime libraries from builder (read-only)
-COPY --from=builder /usr/lib/libpq.so* /usr/lib/
-COPY --from=builder /usr/lib/postgresql* /usr/lib/
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser -d /home/appuser appuser \
+    && mkdir -p /home/appuser/.local \
+    && chown -R appuser:appuser /home/appuser
 
-# Copy installed packages and compiled app with read-only permissions
-COPY --from=builder --chown=nonroot:nonroot --chmod=555 /home/nonroot/.local /home/nonroot/.local
-COPY --from=builder --chown=nonroot:nonroot --chmod=555 /build/app ./app
+# Copy installed packages and compiled app from builder
+COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
+COPY --from=builder --chown=appuser:appuser /build/app ./app
+
+# Set permissions
+RUN chmod -R 555 /home/appuser/.local && chmod -R 555 /app
+
+USER appuser
 
 EXPOSE 8000
 
-# Chainguard Python images have ENTRYPOINT set to python, so just use CMD
-CMD ["-m", "gunicorn", "app.main:app", \
+# Add .local/bin to PATH for gunicorn
+ENV PATH="/home/appuser/.local/bin:$PATH"
+
+CMD ["gunicorn", "app.main:app", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
      "--workers", "4", \
      "--worker-connections", "1000", \
      "--bind", "0.0.0.0:8000", \
      "--timeout", "60", \
      "--keep-alive", "5", \
-     "--max-requests", "10000", \
-     "--max-requests-jitter", "1000", \
+     "--max-requests", "1000", \
+     "--max-requests-jitter", "100", \
      "--graceful-timeout", "30", \
      "--access-logfile", "-", \
      "--error-logfile", "-", \
-     "--log-level", "info", \
-     "--preload"]
+     "--log-level", "info"]
