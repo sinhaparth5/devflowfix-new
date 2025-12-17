@@ -278,6 +278,37 @@ class GitHubClient:
         exponential_backoff=True,
         exceptions=(GitHubAPIError,),
     )
+    async def put(
+        self,
+        endpoint: str,
+        json: Optional[Dict[str, Any]] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """
+        Make PUT request to GitHub API.
+        
+        Args:
+            endpoint: API endpoint
+            json: JSON body data
+            **kwargs: Additional request parameters
+            
+        Returns:
+            Response JSON data
+        """
+        return await self.circuit_breaker._call_async(
+            self._request,
+            "PUT",
+            endpoint,
+            json=json,
+            **kwargs,
+        )
+    
+    @retry(
+        max_attempts=3,
+        base_delay=1.0,
+        exponential_backoff=True,
+        exceptions=(GitHubAPIError,),
+    )
     async def patch(
         self,
         endpoint: str,
@@ -660,7 +691,7 @@ class GitHubClient:
             branch: str,
             sha: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Create or update a file."""
+        """Create or update a file via PUT request."""
         import base64
         endpoint = f"/repos/{owner}/{repo}/contents/{path}"
         content_b64 = base64.b64encode(content.encode()).decode()
@@ -674,7 +705,7 @@ class GitHubClient:
         if sha:
             payload["sha"] = sha
 
-        return await self.post(endpoint, json=payload)
+        return await self.put(endpoint, json=payload)
     
     async def create_pull_request(
             self,
