@@ -138,6 +138,12 @@ class CircuitBreaker:
             return result
         
         except self.config.expected_exception as e:
+            # Don't count 404 errors (not found) as failures - these are expected
+            from app.exceptions import GitHubAPIError
+            if isinstance(e, GitHubAPIError) and hasattr(e, 'status_code') and e.status_code == 404:
+                # Still raise the exception, but don't record as circuit breaker failure
+                raise
+            
             self._on_failure()
             raise
     
@@ -164,6 +170,12 @@ class CircuitBreaker:
             return result
         
         except self.config.expected_exception as e:
+            # Don't count 404 errors (not found) as failures - these are expected
+            from app.exceptions import GitHubAPIError
+            if isinstance(e, GitHubAPIError) and hasattr(e, 'status_code') and e.status_code == 404:
+                # Still raise the exception, but don't record as circuit breaker failure
+                raise
+            
             self._on_failure()
             raise
     
