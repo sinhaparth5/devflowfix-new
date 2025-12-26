@@ -442,6 +442,148 @@ class AuthService:
         logger.info("user_logged_in", user_id=user.user_id, session_id=session.session_id)
         return user, access_token, refresh_token, session.session_id
 
+    def authenticate_oauth(
+        self,
+        provider: str,
+        provider_user_id: str,
+        email: str,
+        name: Optional[str] = None,
+        avatar_url: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        device_fingerprint: Optional[str] = None,
+    ) -> Tuple[UserTable, str, str, str]:
+        """
+        Authenticate user via OAuth provider (Google or GitHub).
+        Creates a new user if they don't exist.
+
+        Returns:
+            Tuple of (user, access_token, refresh_token, session_id)
+        """
+        # Check for IP-based brute force
+        self._check_ip_lockout(ip_address)
+
+        # Try to find existing user by OAuth provider and ID
+        user = self.user_repo.get_by_oauth(provider, provider_user_id)
+
+        # If not found, try to find by email (for account linking)
+        if not user:
+            user = self.user_repo.get_by_email(email)
+
+            # If user exists with same email but different auth method
+            if user:
+                # Link OAuth to existing account
+                user.oauth_provider = provider
+                user.oauth_id = provider_user_id
+
+                # Update profile info if not set
+                if not user.full_name and name:
+                    user.full_name = name
+                if not user.avatar_url and avatar_url:
+                    user.avatar_url = avatar_url
+
+                user.updated_at = datetime.now(timezone.utc)
+                self.user_repo.db.commit()
+
+                logger.info(
+                    "oauth_account_linked",
+                    user_id=user.user_id,
+                    provider=provider,
+                    email=email,
+                )
+            else:
+                # Create new user
+                user = UserTable(
+                    user_id=f"dev_{uuid4().hex[:12]}",
+                    email=email.lower(),
+                    hashed_password=None,  # OAuth users don't have password
+                    full_name=name,
+                    avatar_url=avatar_url,
+                    oauth_provider=provider,
+                    oauth_id=provider_user_id,
+                    role="user",
+                    is_active=True,
+                    is_verified=True,  # OAuth users are pre-verified by provider
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                )
+
+                user = self.user_repo.create(user)
+
+                self._log_audit(
+                    user_id=user.user_id,
+                    action="oauth_register",
+                    success=True,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    details={"provider": provider, "email": email},
+                )
+
+                logger.info(
+                    "oauth_user_registered",
+                    user_id=user.user_id,
+                    provider=provider,
+                    email=email,
+                )
+
+        # Verify user is active
+        if not user.is_active:
+            self._log_audit(
+                user_id=user.user_id,
+                action="oauth_login",
+                success=False,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                details={"reason": "account_disabled", "provider": provider},
+            )
+            raise AuthenticationError("User account is disabled", "account_disabled")
+
+        # Check session limit
+        active_sessions = self.session_repo.count_active_sessions(user.user_id)
+        if active_sessions >= MAX_ACTIVE_SESSIONS:
+            # Revoke oldest session
+            sessions = self.session_repo.get_user_sessions(user.user_id)
+            if sessions:
+                oldest = sessions[-1]
+                self.session_repo.revoke_session(oldest.session_id, "Session limit reached")
+
+        # Create session
+        session = self._create_session(
+            user=user,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            device_fingerprint=device_fingerprint,
+        )
+
+        # Create tokens
+        access_token = self.create_access_token(user, session.session_id)
+        refresh_token, refresh_hash = self.create_refresh_token(user, session.session_id)
+
+        # Update session with refresh token hash
+        session.refresh_token_hash = refresh_hash
+        self.session_repo.db.commit()
+
+        # Update last login
+        self.user_repo.update_last_login(user.user_id, ip_address, user_agent)
+
+        self._log_audit(
+            user_id=user.user_id,
+            session_id=session.session_id,
+            action="oauth_login",
+            success=True,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            details={"provider": provider},
+        )
+
+        logger.info(
+            "oauth_user_logged_in",
+            user_id=user.user_id,
+            provider=provider,
+            session_id=session.session_id,
+        )
+        return user, access_token, refresh_token, session.session_id
+
     def _create_session(
         self,
         user: UserTable,

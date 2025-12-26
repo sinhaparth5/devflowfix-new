@@ -153,6 +153,24 @@ class LogoutResponse(BaseModel):
     sessions_revoked: int = 0
 
 
+class OAuthLoginRequest(BaseModel):
+    """Schema for OAuth login request."""
+    provider: str = Field(..., description="OAuth provider (google or github)")
+    code: str = Field(..., description="Authorization code from OAuth provider")
+    redirect_uri: str = Field(..., description="Redirect URI used in OAuth flow")
+    device_fingerprint: Optional[str] = Field(None, description="Device fingerprint for session tracking")
+
+
+class OAuthCallbackRequest(BaseModel):
+    """Schema for OAuth callback data."""
+    access_token: str = Field(..., description="Access token from OAuth provider")
+    email: str = Field(..., description="User email from OAuth provider")
+    name: Optional[str] = Field(None, description="User name from OAuth provider")
+    avatar_url: Optional[str] = Field(None, description="Avatar URL from OAuth provider")
+    provider_user_id: str = Field(..., description="User ID from OAuth provider")
+    device_fingerprint: Optional[str] = Field(None, description="Device fingerprint for session tracking")
+
+
 class PasswordChangeRequest(BaseModel):
     """Schema for password change request."""
     current_password: str = Field(..., description="Current password")

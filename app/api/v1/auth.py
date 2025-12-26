@@ -8,6 +8,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 import structlog
 import base64
+import httpx
 
 from app.dependencies import get_db
 from app.adapters.database.postgres.repositories.users import (
@@ -40,6 +41,8 @@ from app.core.schemas.users import (
     RevokeSessionRequest,
     APIKeyCreateResponse,
     AccessTokenClaims,
+    OAuthLoginRequest,
+    OAuthCallbackRequest,
 )
 from app.core.schemas.common import SuccessResponse, ErrorResponse
 
@@ -1110,3 +1113,305 @@ async def revoke_api_key(
         success=True,
         message="API key revoked successfully",
     )
+
+
+# OAuth Authentication
+
+@router.post(
+    "/oauth/google",
+    response_model=LoginResponse,
+    summary="Login with Google OAuth",
+    responses={
+        401: {"model": ErrorResponse, "description": "OAuth authentication failed"},
+    },
+)
+async def oauth_google_login(
+    oauth_data: OAuthLoginRequest,
+    request: Request,
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    """
+    Authenticate user with Google OAuth.
+
+    Flow:
+    1. Frontend redirects user to Google OAuth
+    2. User authorizes app
+    3. Google redirects back with authorization code
+    4. Frontend sends code to this endpoint
+    5. Backend exchanges code for access token
+    6. Backend fetches user info from Google
+    7. Backend creates or updates user account
+    8. Returns JWT tokens
+
+    Required settings:
+    - GOOGLE_OAUTH_CLIENT_ID
+    - GOOGLE_OAUTH_CLIENT_SECRET
+    - GOOGLE_OAUTH_REDIRECT_URI
+    """
+    if oauth_data.provider != "google":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid provider. Expected 'google'",
+        )
+
+    if not settings.google_oauth_client_id or not settings.google_oauth_client_secret:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Google OAuth is not configured on the server",
+        )
+
+    client_info = get_client_info(request)
+
+    try:
+        # Exchange authorization code for access token
+        async with httpx.AsyncClient() as client:
+            token_response = await client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": oauth_data.code,
+                    "client_id": settings.google_oauth_client_id,
+                    "client_secret": settings.google_oauth_client_secret,
+                    "redirect_uri": oauth_data.redirect_uri,
+                    "grant_type": "authorization_code",
+                },
+            )
+
+            if token_response.status_code != 200:
+                logger.warning(
+                    "google_oauth_token_exchange_failed",
+                    status_code=token_response.status_code,
+                    response=token_response.text,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Failed to exchange authorization code",
+                )
+
+            token_data = token_response.json()
+            google_access_token = token_data.get("access_token")
+
+            # Fetch user info from Google
+            user_info_response = await client.get(
+                "https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization": f"Bearer {google_access_token}"},
+            )
+
+            if user_info_response.status_code != 200:
+                logger.warning(
+                    "google_oauth_userinfo_failed",
+                    status_code=user_info_response.status_code,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Failed to fetch user information from Google",
+                )
+
+            user_info = user_info_response.json()
+
+        # Authenticate or create user
+        user, access_token, refresh_token, session_id = auth_service.authenticate_oauth(
+            provider="google",
+            provider_user_id=user_info["id"],
+            email=user_info["email"],
+            name=user_info.get("name"),
+            avatar_url=user_info.get("picture"),
+            ip_address=client_info["ip_address"],
+            user_agent=client_info["user_agent"],
+            device_fingerprint=oauth_data.device_fingerprint,
+        )
+
+        logger.info(
+            "google_oauth_login_success",
+            user_id=user.user_id,
+            session_id=session_id,
+        )
+
+        return LoginResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+            expires_in=settings.access_token_expire_minutes * 60,
+            user=UserResponse.model_validate(user),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "google_oauth_error",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="OAuth authentication failed",
+        )
+
+
+@router.post(
+    "/oauth/github",
+    response_model=LoginResponse,
+    summary="Login with GitHub OAuth",
+    responses={
+        401: {"model": ErrorResponse, "description": "OAuth authentication failed"},
+    },
+)
+async def oauth_github_login(
+    oauth_data: OAuthLoginRequest,
+    request: Request,
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    """
+    Authenticate user with GitHub OAuth.
+
+    Flow:
+    1. Frontend redirects user to GitHub OAuth
+    2. User authorizes app
+    3. GitHub redirects back with authorization code
+    4. Frontend sends code to this endpoint
+    5. Backend exchanges code for access token
+    6. Backend fetches user info from GitHub
+    7. Backend creates or updates user account
+    8. Returns JWT tokens
+
+    Required settings:
+    - GITHUB_OAUTH_CLIENT_ID
+    - GITHUB_OAUTH_CLIENT_SECRET
+    - GITHUB_OAUTH_REDIRECT_URI
+    """
+    if oauth_data.provider != "github":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid provider. Expected 'github'",
+        )
+
+    if not settings.github_oauth_client_id or not settings.github_oauth_client_secret:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="GitHub OAuth is not configured on the server",
+        )
+
+    client_info = get_client_info(request)
+
+    try:
+        # Exchange authorization code for access token
+        async with httpx.AsyncClient() as client:
+            token_response = await client.post(
+                "https://github.com/login/oauth/access_token",
+                data={
+                    "code": oauth_data.code,
+                    "client_id": settings.github_oauth_client_id,
+                    "client_secret": settings.github_oauth_client_secret,
+                    "redirect_uri": oauth_data.redirect_uri,
+                },
+                headers={"Accept": "application/json"},
+            )
+
+            if token_response.status_code != 200:
+                logger.warning(
+                    "github_oauth_token_exchange_failed",
+                    status_code=token_response.status_code,
+                    response=token_response.text,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Failed to exchange authorization code",
+                )
+
+            token_data = token_response.json()
+            github_access_token = token_data.get("access_token")
+
+            if not github_access_token:
+                logger.warning(
+                    "github_oauth_no_access_token",
+                    response=token_data,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Failed to obtain access token from GitHub",
+                )
+
+            # Fetch user info from GitHub
+            user_info_response = await client.get(
+                "https://api.github.com/user",
+                headers={
+                    "Authorization": f"Bearer {github_access_token}",
+                    "Accept": "application/json",
+                },
+            )
+
+            if user_info_response.status_code != 200:
+                logger.warning(
+                    "github_oauth_userinfo_failed",
+                    status_code=user_info_response.status_code,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Failed to fetch user information from GitHub",
+                )
+
+            user_info = user_info_response.json()
+
+            # GitHub doesn't always provide email in the main user endpoint
+            # Fetch emails separately if needed
+            email = user_info.get("email")
+            if not email:
+                emails_response = await client.get(
+                    "https://api.github.com/user/emails",
+                    headers={
+                        "Authorization": f"Bearer {github_access_token}",
+                        "Accept": "application/json",
+                    },
+                )
+                if emails_response.status_code == 200:
+                    emails = emails_response.json()
+                    # Get primary verified email
+                    for email_data in emails:
+                        if email_data.get("primary") and email_data.get("verified"):
+                            email = email_data.get("email")
+                            break
+
+            if not email:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="GitHub account must have a verified email address",
+                )
+
+        # Authenticate or create user
+        user, access_token, refresh_token, session_id = auth_service.authenticate_oauth(
+            provider="github",
+            provider_user_id=str(user_info["id"]),
+            email=email,
+            name=user_info.get("name") or user_info.get("login"),
+            avatar_url=user_info.get("avatar_url"),
+            ip_address=client_info["ip_address"],
+            user_agent=client_info["user_agent"],
+            device_fingerprint=oauth_data.device_fingerprint,
+        )
+
+        logger.info(
+            "github_oauth_login_success",
+            user_id=user.user_id,
+            session_id=session_id,
+        )
+
+        return LoginResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+            expires_in=settings.access_token_expire_minutes * 60,
+            user=UserResponse.model_validate(user),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "github_oauth_error",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="OAuth authentication failed",
+        )

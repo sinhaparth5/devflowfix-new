@@ -45,6 +45,25 @@ class GitHubSettings(BaseSettings):
     )
 
 
+class OAuthSettings(BaseSettings):
+    """OAuth provider configuration."""
+
+    google_client_id: Optional[str] = Field(default=None, alias="GOOGLE_OAUTH_CLIENT_ID")
+    google_client_secret: Optional[str] = Field(default=None, alias="GOOGLE_OAUTH_CLIENT_SECRET")
+    google_redirect_uri: Optional[str] = Field(default=None, alias="GOOGLE_OAUTH_REDIRECT_URI")
+
+    github_client_id: Optional[str] = Field(default=None, alias="GITHUB_OAUTH_CLIENT_ID")
+    github_client_secret: Optional[str] = Field(default=None, alias="GITHUB_OAUTH_CLIENT_SECRET")
+    github_redirect_uri: Optional[str] = Field(default=None, alias="GITHUB_OAUTH_REDIRECT_URI")
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+
 class AWSSettings(BaseSettings):
     """AWS configuration."""
 
@@ -330,7 +349,38 @@ class Settings(BaseSettings):
         default="https://api.github.com",
         description="GitHub API base URL"
     )
-    
+
+    # OAuth settings
+    google_oauth_client_id: Optional[str] = Field(
+        default=None,
+        description="Google OAuth 2.0 client ID"
+    )
+
+    google_oauth_client_secret: Optional[str] = Field(
+        default=None,
+        description="Google OAuth 2.0 client secret"
+    )
+
+    google_oauth_redirect_uri: Optional[str] = Field(
+        default=None,
+        description="Google OAuth 2.0 redirect URI"
+    )
+
+    github_oauth_client_id: Optional[str] = Field(
+        default=None,
+        description="GitHub OAuth App client ID"
+    )
+
+    github_oauth_client_secret: Optional[str] = Field(
+        default=None,
+        description="GitHub OAuth App client secret"
+    )
+
+    github_oauth_redirect_uri: Optional[str] = Field(
+        default=None,
+        description="GitHub OAuth App redirect URI"
+    )
+
     # Slack settings
     slack_token: str = Field(
         default="",

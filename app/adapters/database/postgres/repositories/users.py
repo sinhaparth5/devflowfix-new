@@ -51,6 +51,15 @@ class UserRepository:
             )
         ).first()
 
+    def get_by_oauth(self, provider: str, oauth_id: str) -> Optional[UserTable]:
+        """Get user by OAuth provider and ID."""
+        return self.db.query(UserTable).filter(
+            and_(
+                UserTable.oauth_provider == provider,
+                UserTable.oauth_id == oauth_id
+            )
+        ).first()
+
     def update(self, user: UserTable) -> UserTable:
         """Update an existing user."""
         try:
