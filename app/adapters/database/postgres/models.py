@@ -30,7 +30,11 @@ class UserTable(SQLModel, table=True):
 
     # Authentication
     email: str = Field(unique=True, index=True, max_length=255)
-    hashed_password: str = Field(sa_column=Column(Text))
+    hashed_password: Optional[str] = Field(default=None, sa_column=Column(Text))
+
+    # OAuth Authentication
+    oauth_provider: Optional[str] = Field(default=None, max_length=50, index=True)  # 'google', 'github', or None
+    oauth_id: Optional[str] = Field(default=None, max_length=255, index=True)  # Unique ID from OAuth provider
 
     # Profile Information
     full_name: Optional[str] = Field(default=None, max_length=255)
@@ -83,6 +87,7 @@ class UserTable(SQLModel, table=True):
         Index('idx_users_email_active', 'email', 'is_active'),
         Index('idx_users_org_team', 'organization_id', 'team_id'),
         Index('idx_users_role', 'role'),
+        Index('idx_users_oauth', 'oauth_provider', 'oauth_id'),
     )
 
 class UserSessionTable(SQLModel, table=True):
